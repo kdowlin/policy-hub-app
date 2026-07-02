@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YAA Policy Hub</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+<style>
+:root{--navy:#1F4E79;--navy2:#2E75B6;--bg:#f5f7fa;--card:#fff;--border:#dde3ea;--text:#1a2733;--muted:#61718a;
+--p1:#c0392b;--p2:#b7791f;--p3:#2b6cb0;--yellow:#fff3bf;--green:#2f855a;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--text);font-size:15px}
+header{background:var(--navy);color:#fff;padding:14px 24px;display:flex;align-items:center;gap:18px;position:sticky;top:0;z-index:10}
+header h1{font-size:17px;font-weight:700;letter-spacing:.3px}
+header .sub{font-size:12px;opacity:.75}
+nav{margin-left:auto;display:flex;gap:4px}
+nav button{background:transparent;border:none;color:#cfe0f0;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:14px}
+nav button.active,nav button:hover{background:rgba(255,255,255,.15);color:#fff}
+main{max-width:1200px;margin:0 auto;padding:24px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+.stat .n{font-size:26px;font-weight:700;color:var(--navy)}
+.stat .l{font-size:12px;color:var(--muted)}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.filters select,.filters input{padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;background:#fff}
+.filters input{flex:1;min-width:180px}
+table{width:100%;border-collapse:collapse;background:var(--card);border-radius:10px;overflow:hidden}
+th{background:var(--navy);color:#fff;text-align:left;padding:9px 12px;font-size:12.5px;position:sticky}
+td{padding:9px 12px;border-bottom:1px solid var(--border);font-size:13.5px;vertical-align:top}
+tr:hover td{background:#eef3f9;cursor:pointer}
+.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.P1{background:#fde8e6;color:var(--p1)}.P2{background:#fdf3d7;color:var(--p2)}.P3{background:#e3eefc;color:var(--p3)}
+.sDraft{background:#eceff3;color:#4a5568}.sIn.Review,.sReview{background:#fdf3d7;color:var(--p2)}
+.sLegal{background:#e9e3fc;color:#6b46c1}.sApproved{background:#e0f2e9;color:var(--green)}.sAdopted{background:#2f855a;color:#fff}
+.sOpen{background:#fde8e6;color:var(--p1)}.sClosed{background:#e0f2e9;color:var(--green)}
+.flagcount{color:var(--p1);font-weight:700}
+#policyView .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:16px}
+#policyView .meta div{background:#eef3f9;border-radius:7px;padding:8px 12px;font-size:12.5px}
+#policyView .meta b{display:block;color:var(--navy);font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+.mdbody h1{color:var(--navy);font-size:24px;margin:8px 0 16px}
+.mdbody h2{color:var(--navy);font-size:18px;margin:22px 0 10px;border-bottom:2px solid var(--border);padding-bottom:5px}
+.mdbody h3{font-size:15px;margin:16px 0 8px}
+.mdbody p,.mdbody li{line-height:1.55;margin-bottom:7px}
+.mdbody ul{padding-left:22px}
+.mdbody blockquote{background:var(--yellow);border-left:4px solid #e0a800;padding:10px 14px;border-radius:0 7px 7px 0;margin:10px 0}
+.mdbody blockquote p{margin:0}
+.mdbody table{margin:10px 0}
+.mdbody table th{position:static}
+.btn{background:var(--navy);color:#fff;border:none;padding:9px 16px;border-radius:7px;cursor:pointer;font-size:14px;font-weight:600}
+.btn.ghost{background:#fff;color:var(--navy);border:1px solid var(--navy)}
+.btn.green{background:var(--green)}
+.btn:disabled{opacity:.5;cursor:default}
+.topbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+textarea#editor{width:100%;height:65vh;font-family:ui-monospace,Consolas,monospace;font-size:13px;padding:14px;border:1px solid var(--border);border-radius:8px;line-height:1.5}
+.commitrow{display:flex;gap:10px;margin-top:10px}
+.commitrow input{flex:1;padding:9px 12px;border:1px solid var(--border);border-radius:7px}
+#setup{max-width:520px;margin:60px auto}
+#setup label{display:block;font-size:13px;font-weight:600;margin:14px 0 4px}
+#setup input{width:100%;padding:10px;border:1px solid var(--border);border-radius:7px;font-size:14px}
+#setup .hint{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.5}
+.toast{position:fixed;bottom:22px;right:22px;background:var(--navy);color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;box-shadow:0 4px 18px rgba(0,0,0,.25);opacity:0;transition:opacity .3s;z-index:99}
+.toast.show{opacity:1}
+.toast.err{background:var(--p1)}
+.regnote{font-size:12px;color:var(--muted);margin:6px 0 12px}
+select.inline{padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px}
+.hidden{display:none}
+.spin{text-align:center;color:var(--muted);padding:40px}
+@media(max-width:700px){main{padding:12px}td,th{padding:7px 8px;font-size:12.5px}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>YAA Policy Hub</h1><div class="sub">Joint Commission BHC · standards eff. July 1, 2026</div></div>
+  <nav id="nav" class="hidden">
+    <button data-v="dashboard" class="active">Policies</button>
+    <button data-v="register">Remediation Register</button>
+    <button data-v="settings">Settings</button>
+  </nav>
+</header>
+<main id="app"><div class="spin">Loading…</div></main>
+<div id="toast" class="toast"></div>
+
+<script>
+/* ================= GitHub backend ================= */
+const CFG_KEY='yaa_hub_cfg';
+let cfg=JSON.parse(sessionStorage.getItem(CFG_KEY)||localStorage.getItem(CFG_KEY)||'null');
+let keyring=null;
+const api=(path,opts={})=>fetch(`https://api.github.com/repos/${cfg.repo}/${path}`,{
+  ...opts, headers:{'Authorization':`Bearer ${cfg.token}`,'Accept':'application/vnd.github+json',
+  'X-GitHub-Api-Version':'2022-11-28',...(opts.headers||{})}});
+const b64e=s=>btoa(unescape(encodeURIComponent(s)));
+const b64d=s=>decodeURIComponent(escape(atob(s.replace(/\n/g,''))));
+async function ghRead(path){
+  const r=await api(`contents/${encodeURIComponent(path).replace(/%2F/g,'/')}?ref=${cfg.branch}`);
+  if(!r.ok) throw new Error(`${r.status} reading ${path}`);
+  const j=await r.json(); return {text:b64d(j.content), sha:j.sha};
+}
+async function ghWrite(path,content,message,sha){
+  const r=await api(`contents/${encodeURIComponent(path).replace(/%2F/g,'/')}`,{method:'PUT',
+    body:JSON.stringify({message,content:b64e(content),sha,branch:cfg.branch,
+      committer:{name:cfg.name||'Policy Hub',email:cfg.email||'hub@youareaccountable.com'}})});
+  if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(`${r.status} saving ${path}: ${j.message||''}`);}
+  return (await r.json()).content.sha;
+}
+/* ================= state ================= */
+let manifest=[], register=[], view='dashboard', current=null, shas={};
+const $=s=>document.querySelector(s);
+const app=$('#app');
+const toast=(m,err)=>{const t=$('#toast');t.textContent=m;t.className='toast show'+(err?' err':'');setTimeout(()=>t.className='toast',3200);};
+const STATUSES=['Draft','In Review','Legal Review','Approved','Adopted'];
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ================= front matter ================= */
+function parseFM(text){
+  const m=text.match(/^---\n([\s\S]*?)\n---\n?/); if(!m) return {fm:{},body:text,raw:''};
+  const fm={}; m[1].split('\n').forEach(l=>{const i=l.indexOf(':');if(i>0)fm[l.slice(0,i).trim()]=l.slice(i+1).trim().replace(/^"|"$/g,'').replace(/\\"/g,'"');});
+  return {fm,body:text.slice(m[0].length),raw:m[0]};
+}
+function buildFM(fm){return '---\n'+Object.entries(fm).map(([k,v])=>`${k}: "${String(v).replace(/"/g,'\\"')}"`).join('\n')+'\n---\n\n';}
+
+/* ================= password unlock (keyring) ================= */
+const b64ab=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function deriveKey(pw,salt){
+  const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'},km,
+    {name:'AES-GCM',length:256},false,['decrypt','encrypt']);
+}
+async function tryUnlock(pw){
+  for(const entry of keyring.users){
+    try{
+      const key=await deriveKey(pw,b64ab(entry.salt));
+      const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64ab(entry.iv)},key,b64ab(entry.ct));
+      return JSON.parse(new TextDecoder().decode(pt));
+    }catch(e){/* wrong password for this entry — try next */}
+  }
+  return null;
+}
+function renderUnlock(msg){
+  $('#nav').classList.add('hidden');
+  app.innerHTML=`<div id="setup" class="card" style="text-align:center">
+    <h2 style="color:var(--navy)">YAA Policy Hub</h2>
+    <p style="font-size:13.5px;color:var(--muted);margin-top:6px">Joint Commission policy library — team access</p>
+    ${msg?`<p style="color:var(--p1);margin-top:10px">${esc(msg)}</p>`:''}
+    <label style="text-align:left">Your password</label>
+    <input id="u_pw" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doUnlock()">
+    <div style="text-align:left;margin-top:8px"><label style="display:inline;font-weight:400;font-size:13px">
+      <input type="checkbox" id="u_rem" style="width:auto"> Keep me signed in on this computer</label></div>
+    <div style="margin-top:16px"><button class="btn" onclick="doUnlock()">Open</button></div>
+    <div style="margin-top:16px"><a href="#" style="font-size:12px;color:var(--muted)" onclick="renderSetup();return false">Admin: connect with a GitHub token instead</a></div>
+  </div>`;
+  $('#u_pw').focus();
+}
+async function doUnlock(){
+  const pw=$('#u_pw').value; if(!pw) return;
+  const c=await tryUnlock(pw);
+  if(!c) return renderUnlock('That password didn\'t work — check with Kiel.');
+  cfg=c;
+  ( $('#u_rem').checked ? localStorage : sessionStorage ).setItem(CFG_KEY,JSON.stringify(cfg));
+  boot();
+}
+/* ================= setup (admin fallback) ================= */
+function renderSetup(msg){
+  $('#nav').classList.add('hidden');
+  app.innerHTML=`<div id="setup" class="card">
+    <h2 style="color:var(--navy)">Connect to GitHub</h2>
+    ${msg?`<p style="color:var(--p1);margin-top:8px">${esc(msg)}</p>`:''}
+    <label>Repository (owner/name)</label><input id="s_repo" placeholder="youareaccountable/policy-hub" value="${esc(cfg?.repo||'')}">
+    <label>Branch</label><input id="s_branch" value="${esc(cfg?.branch||'main')}">
+    <label>Fine-grained personal access token</label><input id="s_token" type="password" value="${esc(cfg?.token||'')}">
+    <div class="hint">GitHub → Settings → Developer settings → Fine-grained tokens → Generate. Scope it to only this repository with <b>Contents: Read and write</b>. The token stays in this browser only.</div>
+    <label>Your name (for the change log)</label><input id="s_name" placeholder="AJ Diaz" value="${esc(cfg?.name||'')}">
+    <label>Your email</label><input id="s_email" placeholder="aj@youareaccountable.com" value="${esc(cfg?.email||'')}">
+    <div style="margin-top:18px"><button class="btn" onclick="saveSetup()">Connect</button></div>
+  </div>`;
+}
+async function saveSetup(){
+  cfg={repo:$('#s_repo').value.trim(),branch:$('#s_branch').value.trim()||'main',token:$('#s_token').value.trim(),
+       name:$('#s_name').value.trim(),email:$('#s_email').value.trim()};
+  localStorage.setItem(CFG_KEY,JSON.stringify(cfg));
+  boot();
+}
+/* ================= boot ================= */
+async function boot(){
+  if(!cfg||!cfg.token||!cfg.repo){
+    if(keyring===null){
+      try{ const r=await fetch('keyring.json',{cache:'no-store'}); keyring=r.ok?await r.json():false; }
+      catch(e){ keyring=false; }
+    }
+    return keyring&&keyring.users?renderUnlock():renderSetup();
+  }
+  app.innerHTML='<div class="spin">Connecting to GitHub…</div>';
+  try{
+    const m=await ghRead('data/manifest.json'); manifest=JSON.parse(m.text); shas['data/manifest.json']=m.sha;
+    const r=await ghRead('data/register.json'); register=JSON.parse(r.text); shas['data/register.json']=r.sha;
+  }catch(e){
+    sessionStorage.removeItem(CFG_KEY); localStorage.removeItem(CFG_KEY); cfg=null;
+    return keyring&&keyring.users?renderUnlock('Could not load data: '+e.message):renderSetup('Could not load data: '+e.message);
+  }
+  $('#nav').classList.remove('hidden');
+  render();
+}
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{view=b.dataset.v;current=null;
+  document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('active',x===b));render();});
+function render(){ if(view==='dashboard') current?renderPolicy():renderDash();
+  else if(view==='register') renderRegister(); else renderSettings(); }
+
+/* ================= dashboard ================= */
+let f_ch='',f_pr='',f_st='',f_ow='',f_q='';
+function renderDash(){
+  const chs=[...new Set(manifest.map(p=>p.chapter))].sort();
+  const ows=[...new Set(manifest.map(p=>p.owner.split(',')[0]))].sort();
+  const openFlags=manifest.reduce((a,p)=>a+(p.flags||0),0);
+  const adopted=manifest.filter(p=>p.status==='Adopted').length;
+  const openReg=register.filter(i=>i.status!=='Closed').length;
+  let rows=manifest.filter(p=>
+    (!f_ch||p.chapter===f_ch)&&(!f_pr||p.priority===f_pr)&&(!f_st||p.status===f_st)&&
+    (!f_ow||p.owner.startsWith(f_ow))&&(!f_q||(p.title+p.id).toLowerCase().includes(f_q.toLowerCase())));
+  app.innerHTML=`
+  <div class="stats">
+    <div class="stat"><div class="n">${manifest.length}</div><div class="l">Policies</div></div>
+    <div class="stat"><div class="n">${adopted}</div><div class="l">Adopted</div></div>
+    <div class="stat"><div class="n">${openFlags}</div><div class="l">Open flags in policies</div></div>
+    <div class="stat"><div class="n">${openReg}</div><div class="l">Open register items</div></div>
+  </div>
+  <div class="filters">
+    <input placeholder="Search title or standard…" value="${esc(f_q)}" oninput="f_q=this.value;renderDash()">
+    <select onchange="f_ch=this.value;renderDash()"><option value="">All chapters</option>${chs.map(c=>`<option ${c===f_ch?'selected':''}>${esc(c)}</option>`).join('')}</select>
+    <select onchange="f_pr=this.value;renderDash()"><option value="">All priorities</option><option ${f_pr==='P1'?'selected':''}>P1</option><option ${f_pr==='P2'?'selected':''}>P2</option><option ${f_pr==='P3'?'selected':''}>P3</option></select>
+    <select onchange="f_st=this.value;renderDash()"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s===f_st?'selected':''}>${s}</option>`).join('')}</select>
+    <select onchange="f_ow=this.value;renderDash()"><option value="">All owners</option>${ows.map(o=>`<option ${o===f_ow?'selected':''}>${esc(o)}</option>`).join('')}</select>
+  </div>
+  <table><thead><tr><th>Standard</th><th>Policy</th><th>Owner</th><th>Priority</th><th>Status</th><th>Flags</th></tr></thead>
+  <tbody>${rows.map(p=>`<tr onclick="openPolicy('${esc(p.path)}')">
+    <td>${esc(p.id)}</td><td><b>${esc(p.title)}</b><br><span style="color:var(--muted);font-size:12px">${esc(p.chapter)}</span></td>
+    <td>${esc(p.owner.split(',')[0])}</td><td><span class="pill ${p.priority}">${p.priority}</span></td>
+    <td><span class="pill s${p.status.replace(' ','.')}">${p.status}</span></td>
+    <td>${p.flags?`<span class="flagcount">⚠ ${p.flags}</span>`:'✓'}</td></tr>`).join('')}</tbody></table>`;
+}
+/* ================= policy view/edit ================= */
+async function openPolicy(path){
+  current={path}; app.innerHTML='<div class="spin">Loading policy…</div>';
+  try{ const r=await ghRead(path); current.sha=r.sha; current.text=r.text; }
+  catch(e){ toast(e.message,true); current=null; return renderDash(); }
+  renderPolicy();
+}
+function renderPolicy(editing){
+  const {fm,body}=parseFM(current.text);
+  current.fm=fm;
+  const flagRe=/^> ⚠ \*\*(.+?):\*\* ([\s\S]*?)$/gm;
+  const flags=[...body.matchAll(flagRe)];
+  app.innerHTML=`
+  <div class="topbar">
+    <button class="btn ghost" onclick="current=null;render()">← All policies</button>
+    ${editing?'':'<button class="btn" onclick="renderPolicy(true)">✎ Edit</button>'}
+    <span style="margin-left:auto"></span>
+    <label style="font-size:13px;color:var(--muted)">Status:</label>
+    <select class="inline" onchange="setStatus(this.value)">${STATUSES.map(s=>`<option ${s===fm.status?'selected':''}>${s}</option>`).join('')}</select>
+    <a class="btn ghost" style="text-decoration:none" target="_blank" href="https://github.com/${cfg.repo}/commits/${cfg.branch}/${current.path}">History</a>
+  </div>
+  ${editing?`
+    <div class="card"><textarea id="editor">${esc(current.text)}</textarea>
+    <div class="commitrow"><input id="cmsg" placeholder="What changed? e.g. 'Defined 48-hour documentation timeframe (RC.01.03.01)'">
+    <button class="btn green" onclick="savePolicy()">Commit change</button>
+    <button class="btn ghost" onclick="renderPolicy()">Cancel</button></div></div>`
+  :`
+    <div class="card" id="policyView">
+      <div class="meta">
+        <div><b>Standard</b>${esc(fm.standard)} · EP ${esc(fm.eps)}</div>
+        <div><b>Owner</b>${esc(fm.owner)}</div>
+        <div><b>Approver</b>${esc(fm.approver)}</div>
+        <div><b>Version</b>${esc(fm.version)} · <span class="pill ${fm.priority}">${esc(fm.priority)}</span> <span class="pill s${(fm.status||'Draft').replace(' ','.')}">${esc(fm.status)}</span></div>
+      </div>
+      ${flags.length?`<div style="margin-bottom:14px;padding:10px 14px;background:#fde8e6;border-radius:8px;font-size:13px"><b style="color:var(--p1)">⚠ ${flags.length} open item${flags.length>1?'s':''} in this policy</b> — resolve each highlighted block below, then delete it from the text.</div>`:''}
+      <div class="mdbody">${marked.parse(body)}</div>
+    </div>`}`;
+  if(editing)$('#editor').focus();
+}
+async function savePolicy(){
+  const msg=$('#cmsg').value.trim()||`Edit ${current.fm.id}`;
+  const text=$('#editor').value;
+  try{
+    current.sha=await ghWrite(current.path,text,`${msg} [${cfg.name||'team'}]`,current.sha);
+    current.text=text;
+    await syncManifest();
+    toast('Saved — change committed to GitHub');
+    renderPolicy();
+  }catch(e){toast(e.message,true);}
+}
+async function setStatus(status){
+  const {fm,body}=parseFM(current.text);
+  fm.status=status;
+  const text=buildFM(fm)+body;
+  try{
+    current.sha=await ghWrite(current.path,text,`Status → ${status}: ${fm.id} [${cfg.name||'team'}]`,current.sha);
+    current.text=text;
+    await syncManifest();
+    toast(`Status set to ${status}`);
+    renderPolicy();
+  }catch(e){toast(e.message,true);}
+}
+async function syncManifest(){
+  const {fm,body}=parseFM(current.text);
+  const flags=(body.match(/^> ⚠ /gm)||[]).length;
+  const i=manifest.findIndex(p=>p.path===current.path);
+  if(i>=0) manifest[i]={...manifest[i],...fm,flags};
+  try{
+    shas['data/manifest.json']=await ghWrite('data/manifest.json',JSON.stringify(manifest,null,1),
+      `Sync manifest: ${fm.id}`,shas['data/manifest.json']);
+  }catch(e){ // refetch sha and retry once
+    const m=await ghRead('data/manifest.json'); shas['data/manifest.json']=m.sha;
+    shas['data/manifest.json']=await ghWrite('data/manifest.json',JSON.stringify(manifest,null,1),
+      `Sync manifest: ${fm.id}`,shas['data/manifest.json']);
+  }
+}
+/* ================= register ================= */
+let r_pr='',r_ow='',r_st='Open',r_q='';
+function renderRegister(){
+  const ows=[...new Set(register.map(i=>String(i.owner||'').split('(')[0].trim()))].filter(Boolean).sort();
+  let rows=register.filter(i=>
+    (!r_pr||String(i.priority).startsWith(r_pr))&&(!r_ow||String(i.owner).startsWith(r_ow))&&
+    (r_st==='All'||(r_st==='Open'?i.status!=='Closed':i.status==='Closed'))&&
+    (!r_q||(i.finding+i.policy_id+i.policy_title).toLowerCase().includes(r_q.toLowerCase())));
+  const open=register.filter(i=>i.status!=='Closed').length;
+  app.innerHTML=`
+  <div class="stats">
+    <div class="stat"><div class="n">${register.length}</div><div class="l">Total items</div></div>
+    <div class="stat"><div class="n">${open}</div><div class="l">Open</div></div>
+    <div class="stat"><div class="n">${register.length-open}</div><div class="l">Closed</div></div>
+    <div class="stat"><div class="n">${register.filter(i=>i.legal_review&&i.status!=='Closed').length}</div><div class="l">Awaiting legal</div></div>
+  </div>
+  <div class="filters">
+    <input placeholder="Search findings…" value="${esc(r_q)}" oninput="r_q=this.value;renderRegister()">
+    <select onchange="r_pr=this.value;renderRegister()"><option value="">All priorities</option><option ${r_pr==='P1'?'selected':''}>P1</option><option ${r_pr==='P2'?'selected':''}>P2</option><option ${r_pr==='P3'?'selected':''}>P3</option></select>
+    <select onchange="r_ow=this.value;renderRegister()"><option value="">All owners</option>${ows.map(o=>`<option ${o===r_ow?'selected':''}>${esc(o)}</option>`).join('')}</select>
+    <select onchange="r_st=this.value;renderRegister()"><option ${r_st==='Open'?'selected':''}>Open</option><option ${r_st==='Closed'?'selected':''}>Closed</option><option ${r_st==='All'?'selected':''}>All</option></select>
+  </div>
+  <div class="regnote">Changes save to GitHub with full history. Close an item only when the policy text is updated AND the evidence exists.</div>
+  <table><thead><tr><th>#</th><th>Pri</th><th>Policy</th><th>Finding</th><th>Owner</th><th>Legal</th><th>Status</th></tr></thead>
+  <tbody>${rows.map(i=>`<tr>
+    <td>${i.num}</td><td><span class="pill ${String(i.priority).slice(0,2)}">${String(i.priority).slice(0,2)}</span></td>
+    <td style="white-space:nowrap">${esc(i.policy_id)}</td>
+    <td>${esc(i.finding)}${i.evidence?`<br><span style="color:var(--muted);font-size:12px">Evidence: ${esc(i.evidence)}</span>`:''}</td>
+    <td>${esc(String(i.owner).split('(')[0])}</td><td>${i.legal_review?'⚖️':''}</td>
+    <td><select class="inline" onchange="setItem(${i.num},this.value)"><option ${i.status!=='Closed'?'selected':''}>Open</option><option ${i.status==='Closed'?'selected':''}>Closed</option></select></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+async function setItem(num,status){
+  const it=register.find(i=>i.num===num); if(!it) return;
+  it.status=status;
+  try{
+    shas['data/register.json']=await ghWrite('data/register.json',JSON.stringify(register,null,1),
+      `Register #${num} → ${status} [${cfg.name||'team'}]`,shas['data/register.json']);
+    toast(`Item #${num} ${status.toLowerCase()}`);
+    renderRegister();
+  }catch(e){
+    const r=await ghRead('data/register.json'); shas['data/register.json']=r.sha;
+    try{ shas['data/register.json']=await ghWrite('data/register.json',JSON.stringify(register,null,1),
+      `Register #${num} → ${status} [${cfg.name||'team'}]`,shas['data/register.json']);
+      toast(`Item #${num} ${status.toLowerCase()}`); renderRegister(); }
+    catch(e2){ toast(e2.message,true); }
+  }
+}
+/* ================= settings ================= */
+function renderSettings(){
+  app.innerHTML=`<div class="card" style="max-width:560px">
+    <h2 style="color:var(--navy);margin-bottom:10px">Settings</h2>
+    <p style="font-size:13.5px;line-height:1.6;margin-bottom:14px">Signed in as <b>${esc(cfg.name||'—')}</b> · connected to <b>${esc(cfg.repo)}</b> (branch <b>${esc(cfg.branch)}</b>). Every save is a git commit — the full change log is your policy revision history.</p>
+    <button class="btn ghost" onclick="sessionStorage.removeItem('${CFG_KEY}');localStorage.removeItem('${CFG_KEY}');location.reload()">Sign out</button>
+    <button class="btn ghost" style="margin-left:8px" onclick="renderSetup()">Admin: manual connection</button>
+  </div>`;
+}
+boot();
+</script>
+</body>
+</html>
