@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>YAA Policy Hub</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+<link rel="stylesheet" href="https://uicdn.toast.com/editor/3.2.2/toastui-editor.min.css">
+<script src="https://uicdn.toast.com/editor/3.2.2/toastui-editor-all.min.js"></script>
 <style>
 :root{--navy:#1F4E79;--navy2:#2E75B6;--bg:#f5f7fa;--card:#fff;--border:#dde3ea;--text:#1a2733;--muted:#61718a;
 --p1:#c0392b;--p2:#b7791f;--p3:#2b6cb0;--yellow:#fff3bf;--green:#2f855a;}
@@ -53,6 +55,10 @@ tr:hover td{background:#eef3f9;cursor:pointer}
 .btn:disabled{opacity:.5;cursor:default}
 .topbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
 textarea#editor{width:100%;height:65vh;font-family:ui-monospace,Consolas,monospace;font-size:13px;padding:14px;border:1px solid var(--border);border-radius:8px;line-height:1.5}
+.fmedit{width:100%;border:none;background:transparent;font-size:13px;padding:2px 0;border-bottom:1px dashed #b9c6d6;outline:none}
+.toastui-editor-defaultUI{border-radius:8px}
+.toastui-editor-contents blockquote{background:var(--yellow);border-left:4px solid #e0a800;color:inherit}
+.toastui-editor-contents p,.toastui-editor-contents li{font-size:14px;color:var(--text)}
 .commitrow{display:flex;gap:10px;margin-top:10px}
 .commitrow input{flex:1;padding:9px 12px;border:1px solid var(--border);border-radius:7px}
 #setup{max-width:520px;margin:60px auto}
@@ -244,6 +250,7 @@ async function openPolicy(path){
   catch(e){ toast(e.message,true); current=null; return renderDash(); }
   renderPolicy();
 }
+let tui=null;
 function renderPolicy(editing){
   const {fm,body}=parseFM(current.text);
   current.fm=fm;
@@ -259,10 +266,19 @@ function renderPolicy(editing){
     <a class="btn ghost" style="text-decoration:none" target="_blank" href="https://github.com/${cfg.repo}/commits/${cfg.branch}/${current.path}">History</a>
   </div>
   ${editing?`
-    <div class="card"><textarea id="editor">${esc(current.text)}</textarea>
-    <div class="commitrow"><input id="cmsg" placeholder="What changed? e.g. 'Defined 48-hour documentation timeframe (RC.01.03.01)'">
-    <button class="btn green" onclick="savePolicy()">Commit change</button>
-    <button class="btn ghost" onclick="renderPolicy()">Cancel</button></div></div>`
+    <div class="card">
+      <div class="meta" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:14px">
+        <div style="background:#eef3f9;border-radius:7px;padding:8px 12px"><b style="display:block;color:var(--navy);font-size:11px">OWNER</b><input class="fmedit" id="fm_owner" value="${esc(fm.owner)}"></div>
+        <div style="background:#eef3f9;border-radius:7px;padding:8px 12px"><b style="display:block;color:var(--navy);font-size:11px">VERSION</b><input class="fmedit" id="fm_version" value="${esc(fm.version)}"></div>
+        <div style="background:#eef3f9;border-radius:7px;padding:8px 12px"><b style="display:block;color:var(--navy);font-size:11px">EFFECTIVE DATE</b><input class="fmedit" id="fm_effective_date" value="${esc(fm.effective_date)}" placeholder="e.g. August 1, 2026"></div>
+        <div style="background:#eef3f9;border-radius:7px;padding:8px 12px"><b style="display:block;color:var(--navy);font-size:11px">NEXT REVIEW</b><input class="fmedit" id="fm_next_review" value="${esc(fm.next_review)}"></div>
+      </div>
+      <div id="wysiwyg"></div>
+      <div class="commitrow"><input id="cmsg" placeholder="What changed? e.g. 'Defined 48-hour documentation timeframe'">
+      <button class="btn green" onclick="savePolicy()">Save change</button>
+      <button class="btn ghost" onclick="renderPolicy()">Cancel</button></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">Edit like a Word document — the toolbar has headings, bold, bullets, and tables. Yellow ⚠ blocks appear as quoted text; delete a block once its item is resolved.</div>
+    </div>`
   :`
     <div class="card" id="policyView">
       <div class="meta">
@@ -271,19 +287,48 @@ function renderPolicy(editing){
         <div><b>Approver</b>${esc(fm.approver)}</div>
         <div><b>Version</b>${esc(fm.version)} · <span class="pill ${fm.priority}">${esc(fm.priority)}</span> <span class="pill s${(fm.status||'Draft').replace(' ','.')}">${esc(fm.status)}</span></div>
       </div>
-      ${flags.length?`<div style="margin-bottom:14px;padding:10px 14px;background:#fde8e6;border-radius:8px;font-size:13px"><b style="color:var(--p1)">⚠ ${flags.length} open item${flags.length>1?'s':''} in this policy</b> — resolve each highlighted block below, then delete it from the text.</div>`:''}
+      ${flags.length?`<div style="margin-bottom:14px;padding:12px 14px;background:#fde8e6;border-radius:8px;font-size:13px">
+        <b style="color:var(--p1)">⚠ ${flags.length} open item${flags.length>1?'s':''} in this policy</b>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+        ${flags.map((m,i)=>`<div style="display:flex;gap:8px;align-items:flex-start;background:#fff;border-radius:6px;padding:8px 10px">
+          <div style="flex:1"><b>${esc(m[1])}:</b> ${esc(m[2].length>180?m[2].slice(0,180)+'…':m[2])}</div>
+          <button class="btn green" style="padding:4px 10px;font-size:12px;white-space:nowrap" onclick="resolveFlag(${i})">✓ Resolved</button>
+        </div>`).join('')}</div>
+        <div style="margin-top:8px;color:var(--muted);font-size:12px">"Resolved" deletes the yellow block from the policy — only click it once the fix is actually written into the text and any evidence exists.</div>
+      </div>`:''}
       <div class="mdbody">${marked.parse(body)}</div>
     </div>`}`;
-  if(editing)$('#editor').focus();
+  if(editing){
+    tui=new toastui.Editor({el:$('#wysiwyg'),initialValue:body,initialEditType:'wysiwyg',
+      height:'62vh',usageStatistics:false,hideModeSwitch:false,
+      toolbarItems:[['heading','bold','italic'],['ul','ol','quote'],['table','link'],['undo','redo']]});
+  }
+}
+async function resolveFlag(i){
+  const {fm,body}=parseFM(current.text);
+  const flags=[...body.matchAll(/^> ⚠ \*\*(.+?):\*\* ([\s\S]*?)$/gm)];
+  const m=flags[i]; if(!m) return;
+  if(!confirm(`Remove this item from the policy?\n\n${m[1]}: ${m[2].slice(0,140)}`)) return;
+  const newBody=body.replace(m[0]+'\n\n',' ').replace(m[0],'').replace(/\n{3,}/g,'\n\n');
+  const text=buildFM(fm)+newBody;
+  try{
+    current.sha=await ghWrite(current.path,text,`Resolved: ${m[1]} — ${fm.id} [${cfg.name||'team'}]`,current.sha);
+    current.text=text;
+    await syncManifest();
+    toast('Item resolved and logged');
+    renderPolicy();
+  }catch(e){toast(e.message,true);}
 }
 async function savePolicy(){
   const msg=$('#cmsg').value.trim()||`Edit ${current.fm.id}`;
-  const text=$('#editor').value;
+  const {fm}=parseFM(current.text);
+  ['owner','version','effective_date','next_review'].forEach(k=>{const el=$('#fm_'+k);if(el)fm[k]=el.value.trim();});
+  const text=buildFM(fm)+tui.getMarkdown().trim()+'\n';
   try{
     current.sha=await ghWrite(current.path,text,`${msg} [${cfg.name||'team'}]`,current.sha);
     current.text=text;
     await syncManifest();
-    toast('Saved — change committed to GitHub');
+    toast('Saved — change logged');
     renderPolicy();
   }catch(e){toast(e.message,true);}
 }
