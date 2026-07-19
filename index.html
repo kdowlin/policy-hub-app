@@ -230,6 +230,7 @@ function renderDash(){
     <div class="stat"><div class="n">${openReg}</div><div class="l">Open register items</div></div>
   </div>
   <div class="filters">
+    <button class="btn" style="white-space:nowrap" onclick="renderNewPolicy()">+ New policy</button>
     <input placeholder="Search title or standard…" value="${esc(f_q)}" oninput="f_q=this.value;renderDash()">
     <select onchange="f_ch=this.value;renderDash()"><option value="">All chapters</option>${chs.map(c=>`<option ${c===f_ch?'selected':''}>${esc(c)}</option>`).join('')}</select>
     <select onchange="f_pr=this.value;renderDash()"><option value="">All priorities</option><option ${f_pr==='P1'?'selected':''}>P1</option><option ${f_pr==='P2'?'selected':''}>P2</option><option ${f_pr==='P3'?'selected':''}>P3</option></select>
@@ -365,6 +366,89 @@ async function syncManifest(){
     shas['data/manifest.json']=await ghWrite('data/manifest.json',JSON.stringify(manifest,null,1),
       `Sync manifest: ${fm.id}`,shas['data/manifest.json']);
   }
+}
+/* ================= new policy ================= */
+function renderNewPolicy(){
+  const chs=[...new Set(manifest.map(p=>p.chapter))].sort();
+  app.innerHTML=`<div id="setup" class="card" style="max-width:640px;margin:24px auto">
+    <h2 style="color:var(--navy)">New Policy</h2>
+    <label>Standard (e.g. RI.01.07.01)</label><input id="n_std" placeholder="XX.00.00.00">
+    <label>EP(s) (e.g. 1, 4)</label><input id="n_eps" placeholder="1">
+    <label>Policy title</label><input id="n_title" placeholder="Grievance and Complaint Management">
+    <label>Chapter</label><input id="n_chapter" list="chlist" placeholder="Rights of the Individual (RI)"><datalist id="chlist">${chs.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+    <label>Owner</label><input id="n_owner" placeholder="Kiel Dowlin, Chief Strategy Officer">
+    <label>Approver</label><input id="n_approver" value="Matt Serel, CEO (pending signature)">
+    <label>Priority</label><select id="n_pri" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:7px"><option>P1</option><option selected>P2</option><option>P3</option></select>
+    <div class="hint" style="margin-top:8px">Creates <b>policies/&lt;standard&gt;-&lt;slug&gt;.md</b> with the standard section skeleton, adds it to the manifest, and opens it for editing. Every step is a logged commit.</div>
+    <div style="margin-top:16px"><button class="btn green" onclick="createPolicy()">Create policy</button>
+    <button class="btn ghost" style="margin-left:8px" onclick="render()">Cancel</button></div>
+  </div>`;
+  $('#n_std').focus();
+}
+async function createPolicy(){
+  const std=$('#n_std').value.trim(), title=$('#n_title').value.trim();
+  if(!std||!title) return toast('Standard and title are required',true);
+  const fm={id:std,title,chapter:$('#n_chapter').value.trim()||'Uncategorized',
+    standard:std,eps:$('#n_eps').value.trim()||'1',owner:$('#n_owner').value.trim()||'—',
+    approver:$('#n_approver').value.trim()||'—',version:'0.1 (Draft)',priority:$('#n_pri').value,
+    status:'Draft',effective_date:'',next_review:''};
+  const slug=title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60);
+  const path=`policies/${std.replace(/\./g,'-')}-${slug}.md`;
+  if(manifest.some(p=>p.path===path)) return toast('A policy with that standard and title already exists',true);
+  const body=`# ${title}
+
+> ⚠ **DRAFT:** New policy — complete every section, resolve all ⚠ items, and record governance approval before adoption.
+
+## 1. Purpose
+
+The purpose of this policy is to …
+
+## 2. Scope
+
+This policy applies to all employees, peer/recovery specialists, supervisors, volunteers, and contracted personnel of You Are Accountable, Inc. across all virtual service delivery and at the organization's New Jersey office, as applicable.
+
+## 3. Policy Statement
+
+It is the policy of You Are Accountable, Inc. to …, following the procedures below, which reflect the organization's current practice.
+
+## 4. Procedures
+
+…
+
+## 5. Responsibilities
+
+- **Chief Executive Officer:** approves this policy.
+
+## 6. Documentation and Records
+
+- This policy
+- Documentation of periodic review and approval of this policy
+
+## 7. References
+
+Joint Commission Comprehensive Accreditation Manual for Behavioral Health and Human Services — Standard ${std}, EP(s) ${fm.eps} (effective July 1, 2026).
+
+Applicable state licensing and confidentiality requirements in each jurisdiction served.
+
+## 8. Revision History
+
+| Version | Date | Description | Author |
+|---|---|---|---|
+| 0.1 (Draft) | ${new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'2-digit'})} | Initial draft created. | ${cfg.name||'Team'} |
+`;
+  const text=buildFM(fm)+body;
+  try{
+    const sha=await ghWrite(path,text,`New policy: ${std} ${title} [${cfg.name||'team'}]`,undefined);
+    manifest.push({id:std,title,chapter:fm.chapter,standard:std,eps:fm.eps,owner:fm.owner,
+      priority:fm.priority,status:'Draft',path,flags:1});
+    manifest.sort((a,b)=>a.id.localeCompare(b.id));
+    shas['data/manifest.json']=await ghWrite('data/manifest.json',JSON.stringify(manifest,null,1),
+      `Add to manifest: ${std}`,shas['data/manifest.json']);
+    toast('Policy created');
+    current={path,sha,text};
+    view='dashboard';
+    renderPolicy(true);
+  }catch(e){toast(e.message,true);}
 }
 /* ================= register ================= */
 let r_pr='',r_ow='',r_st='Open',r_q='';
