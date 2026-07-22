@@ -125,6 +125,135 @@ function parseFM(text){
 }
 function buildFM(fm){return '---\n'+Object.entries(fm).map(([k,v])=>`${k}: "${String(v).replace(/"/g,'\\"')}"`).join('\n')+'\n---\n\n';}
 
+/* ================= PDF export (print-to-PDF) =================
+   Renders policies into a print-styled document in a hidden iframe
+   and opens the browser print dialog — choose "Save as PDF" there.
+   True selectable text, page breaks between policies, letter size. */
+const PRINT_CSS=`
+@page{size:letter;margin:0.9in 0.8in;
+  @bottom-center{content:"You Are Accountable, Inc. — Confidential · Page " counter(page);font-size:8.5pt;color:#61718a;font-family:Arial,sans-serif;}}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font-family:-apple-system,'Segoe UI',Arial,sans-serif;color:#1a2733;font-size:10.5pt;line-height:1.5}
+.cover{page-break-after:always;display:flex;flex-direction:column;justify-content:center;min-height:8.5in;text-align:center}
+.cover .org{font-size:12pt;letter-spacing:2.5px;text-transform:uppercase;color:#61718a}
+.cover h1{font-size:30pt;color:#1F4E79;margin:18pt 0 6pt}
+.cover .rule{width:1.6in;height:3px;background:#1F4E79;margin:14pt auto}
+.cover .sub{font-size:12pt;color:#1a2733;margin-bottom:4pt}
+.cover .meta{font-size:10pt;color:#61718a;margin-top:22pt;line-height:1.7}
+.cover .conf{margin-top:34pt;font-size:9pt;color:#c0392b;font-weight:700;letter-spacing:1px;text-transform:uppercase}
+.toc{page-break-after:always}
+.toc h2{font-size:16pt;color:#1F4E79;border-bottom:2.5px solid #1F4E79;padding-bottom:5pt;margin-bottom:12pt}
+.toc table{width:100%;border-collapse:collapse;font-size:9.5pt}
+.toc th{text-align:left;color:#1F4E79;border-bottom:1.5px solid #1F4E79;padding:4pt 6pt;font-size:8.5pt;text-transform:uppercase;letter-spacing:.5px}
+.toc td{padding:4.5pt 6pt;border-bottom:1px solid #dde3ea;vertical-align:top}
+.pol{page-break-before:always}
+.pol:first-of-type{page-break-before:auto}
+.pmeta{width:100%;border-collapse:collapse;margin-bottom:10pt;font-size:8.5pt}
+.pmeta td{background:#eef3f9;border:2.5px solid #fff;border-radius:4px;padding:5pt 8pt;vertical-align:top;width:33.3%}
+.pmeta b{display:block;color:#1F4E79;font-size:7.5pt;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1pt}
+.draftbar{background:#fff3bf;border-left:4px solid #e0a800;color:#7a5b00;font-weight:700;font-size:9pt;padding:5pt 9pt;margin-bottom:10pt}
+.mdbody h1{color:#1F4E79;font-size:17pt;margin:0 0 10pt;page-break-after:avoid}
+.mdbody h2{color:#1F4E79;font-size:12.5pt;margin:14pt 0 7pt;border-bottom:1.5px solid #dde3ea;padding-bottom:3pt;page-break-after:avoid}
+.mdbody h3{font-size:11pt;margin:11pt 0 5pt;page-break-after:avoid}
+.mdbody p{margin-bottom:6pt}
+.mdbody li{margin-bottom:4pt}
+.mdbody ul,.mdbody ol{padding-left:18pt;margin-bottom:6pt}
+.mdbody blockquote{background:#fff3bf;border-left:4px solid #e0a800;padding:7pt 10pt;margin:8pt 0;page-break-inside:avoid}
+.mdbody blockquote p{margin:0}
+.mdbody table{width:100%;border-collapse:collapse;margin:8pt 0;font-size:9pt;page-break-inside:auto}
+.mdbody th{background:#1F4E79;color:#fff;text-align:left;padding:4.5pt 7pt}
+.mdbody td{border:1px solid #dde3ea;padding:4.5pt 7pt;vertical-align:top}
+.mdbody tr{page-break-inside:avoid}
+.mdbody hr{border:none;border-top:1px solid #dde3ea;margin:10pt 0}
+.mdbody strong{color:inherit}
+.mdbody a{color:#1F4E79;text-decoration:none}
+.secfoot{margin-top:14pt;padding-top:6pt;border-top:1px solid #dde3ea;font-size:8pt;color:#61718a}
+`;
+function fmtDate(){return new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});}
+function policySectionHTML(fm,body){
+  const status=fm.status||'Draft';
+  const draft=status!=='Adopted';
+  return `<section class="pol">
+    <table class="pmeta"><tr>
+      <td><b>Standard</b>${esc(fm.standard||fm.id)} · EP ${esc(fm.eps||'—')}</td>
+      <td><b>Owner</b>${esc(fm.owner||'—')}</td>
+      <td><b>Approver</b>${esc(fm.approver||'—')}</td></tr><tr>
+      <td><b>Version · Status</b>${esc(fm.version||'—')} · ${esc(status)}</td>
+      <td><b>Effective date</b>${esc(fm.effective_date||'—')}</td>
+      <td><b>Next review</b>${esc(fm.next_review||'—')}</td>
+    </tr></table>
+    ${draft?'<div class="draftbar">DRAFT — not yet adopted; for internal review only</div>':''}
+    <div class="mdbody">${marked.parse(body)}</div>
+    <div class="secfoot">${esc(fm.standard||fm.id)} — ${esc(fm.title||'')} · ${esc(fm.version||'')} · You Are Accountable, Inc. · Printed ${fmtDate()}</div>
+  </section>`;
+}
+function printHTML(docTitle,inner){
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc(docTitle)+'</title>'+
+    '<style>'+PRINT_CSS+'</style></head><body>'+inner+'</body></html>';
+  const f=document.createElement('iframe');
+  f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(f);
+  f.onload=()=>{setTimeout(()=>{
+    try{
+      f.contentWindow.addEventListener('afterprint',()=>setTimeout(()=>f.remove(),500));
+      f.contentWindow.focus();f.contentWindow.print();
+      setTimeout(()=>{if(document.body.contains(f))f.remove();},120000);
+    }catch(e){toast('Print failed: '+e.message,true);f.remove();}
+  },400);};
+  f.srcdoc=html;
+}
+function downloadPolicyPDF(){
+  if(!current||!current.text) return;
+  const {fm,body}=parseFM(current.text);
+  const name=(fm.id||'policy')+' '+(fm.title||'');
+  toast('Opening print dialog — choose "Save as PDF"');
+  printHTML(name.trim(),policySectionHTML(fm,body));
+}
+function dashFiltered(){
+  return manifest.filter(p=>
+    (!f_ch||p.chapter===f_ch)&&(!f_pr||p.priority===f_pr)&&(!f_st||p.status===f_st)&&
+    (!f_ow||p.owner.startsWith(f_ow))&&(!f_q||(p.title+p.id).toLowerCase().includes(f_q.toLowerCase())));
+}
+async function downloadBinder(){
+  const rows=[...dashFiltered()].sort((a,b)=>a.id.localeCompare(b.id));
+  if(!rows.length) return toast('No policies match the current filters',true);
+  const filtered=rows.length!==manifest.length;
+  const btn=$('#binderbtn'); if(btn){btn.disabled=true;btn.textContent='Assembling…';}
+  const secs=[];let failed=0;
+  try{
+    for(let i=0;i<rows.length;i++){
+      if(btn)btn.textContent=`Fetching ${i+1}/${rows.length}…`;
+      try{
+        const r=await ghRead(rows[i].path);
+        const {fm,body}=parseFM(r.text);
+        secs.push({fm:{...rows[i],...fm},body});
+      }catch(e){
+        failed++;
+        secs.push({fm:{...rows[i]},body:`# ${rows[i].title}\n\n> ⚠ **LOAD ERROR:** This policy could not be fetched for the binder (${e.message}). Print it individually.`});
+      }
+    }
+    const adopted=secs.filter(s=>(s.fm.status||'Draft')==='Adopted').length;
+    const cover=`<div class="cover">
+      <div class="org">You Are Accountable, Inc.</div>
+      <h1>Policy &amp; Procedure Binder</h1>
+      <div class="rule"></div>
+      <div class="sub">Joint Commission Behavioral Health &amp; Human Services</div>
+      <div class="sub">Standards effective July 1, 2026</div>
+      <div class="meta">${rows.length} polic${rows.length===1?'y':'ies'}${filtered?' (filtered view)':''} · ${adopted} adopted · Generated ${fmtDate()}<br>
+      331 Newman Springs Road, Building 3, Suite 320, Red Bank, NJ 07701</div>
+      <div class="conf">Confidential — internal use only${adopted<rows.length?' · Contains draft policies not yet adopted':''}</div>
+    </div>`;
+    const toc=`<div class="toc"><h2>Contents</h2>
+      <table><thead><tr><th style="width:16%">Standard</th><th>Policy</th><th style="width:16%">Owner</th><th style="width:14%">Version</th><th style="width:11%">Status</th></tr></thead>
+      <tbody>${secs.map(s=>`<tr><td>${esc(s.fm.standard||s.fm.id)}</td><td>${esc(s.fm.title)}</td><td>${esc(String(s.fm.owner||'—').split(',')[0])}</td><td>${esc(s.fm.version||'—')}</td><td>${esc(s.fm.status||'Draft')}</td></tr>`).join('')}</tbody></table>
+    </div>`;
+    toast(failed?`Binder ready (${failed} polic${failed===1?'y':'ies'} failed to load) — choose "Save as PDF"`:'Opening print dialog — choose "Save as PDF"',!!failed);
+    printHTML(`YAA Policy Binder — ${fmtDate()}`,cover+toc+secs.map(s=>policySectionHTML(s.fm,s.body)).join(''));
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='⬇ Binder PDF';}
+  }
+}
+
 /* ================= password unlock (keyring) ================= */
 const b64ab=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 async function deriveKey(pw,salt){
@@ -219,9 +348,8 @@ function renderDash(){
   const openFlags=manifest.reduce((a,p)=>a+(p.flags||0),0);
   const adopted=manifest.filter(p=>p.status==='Adopted').length;
   const openReg=register.filter(i=>i.status!=='Closed').length;
-  let rows=manifest.filter(p=>
-    (!f_ch||p.chapter===f_ch)&&(!f_pr||p.priority===f_pr)&&(!f_st||p.status===f_st)&&
-    (!f_ow||p.owner.startsWith(f_ow))&&(!f_q||(p.title+p.id).toLowerCase().includes(f_q.toLowerCase())));
+  let rows=dashFiltered();
+  const filtered=rows.length!==manifest.length;
   app.innerHTML=`
   <div class="stats">
     <div class="stat"><div class="n">${manifest.length}</div><div class="l">Policies</div></div>
@@ -231,12 +359,14 @@ function renderDash(){
   </div>
   <div class="filters">
     <button class="btn" style="white-space:nowrap" onclick="renderNewPolicy()">+ New policy</button>
+    <button class="btn ghost" id="binderbtn" style="white-space:nowrap" title="Combine ${filtered?'the filtered':'all'} policies into one print-ready binder — save it as a single PDF from the print dialog" onclick="downloadBinder()">⬇ Binder PDF</button>
     <input placeholder="Search title or standard…" value="${esc(f_q)}" oninput="f_q=this.value;renderDash()">
     <select onchange="f_ch=this.value;renderDash()"><option value="">All chapters</option>${chs.map(c=>`<option ${c===f_ch?'selected':''}>${esc(c)}</option>`).join('')}</select>
     <select onchange="f_pr=this.value;renderDash()"><option value="">All priorities</option><option ${f_pr==='P1'?'selected':''}>P1</option><option ${f_pr==='P2'?'selected':''}>P2</option><option ${f_pr==='P3'?'selected':''}>P3</option></select>
     <select onchange="f_st=this.value;renderDash()"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s===f_st?'selected':''}>${s}</option>`).join('')}</select>
     <select onchange="f_ow=this.value;renderDash()"><option value="">All owners</option>${ows.map(o=>`<option ${o===f_ow?'selected':''}>${esc(o)}</option>`).join('')}</select>
   </div>
+  ${filtered?`<div class="regnote">Binder PDF will include the <b>${rows.length}</b> polic${rows.length===1?'y':'ies'} matching the current filters — clear filters to export the full binder.</div>`:''}
   <table><thead><tr><th>Standard</th><th>Policy</th><th>Owner</th><th>Priority</th><th>Status</th><th>Flags</th></tr></thead>
   <tbody>${rows.map(p=>`<tr onclick="openPolicy('${esc(p.path)}')">
     <td>${esc(p.id)}</td><td><b>${esc(p.title)}</b><br><span style="color:var(--muted);font-size:12px">${esc(p.chapter)}</span></td>
@@ -261,6 +391,7 @@ function renderPolicy(editing){
   <div class="topbar">
     <button class="btn ghost" onclick="current=null;render()">← All policies</button>
     ${editing?'':'<button class="btn" onclick="renderPolicy(true)">✎ Edit</button>'}
+    ${editing?'':'<button class="btn ghost" title="Print-ready copy of this policy — choose Save as PDF in the print dialog" onclick="downloadPolicyPDF()">⬇ PDF</button>'}
     <span style="margin-left:auto"></span>
     <label style="font-size:13px;color:var(--muted)">Status:</label>
     <select class="inline" onchange="setStatus(this.value)">${STATUSES.map(s=>`<option ${s===fm.status?'selected':''}>${s}</option>`).join('')}</select>
