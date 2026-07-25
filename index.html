@@ -81,6 +81,7 @@ select.inline{padding:4px 8px;border:1px solid var(--border);border-radius:6px;f
   <nav id="nav" class="hidden">
     <button data-v="dashboard" class="active">Policies</button>
     <button data-v="register">Remediation Register</button>
+    <button data-v="reminders">Reminders</button>
     <button data-v="documents">Supporting Documents</button>
     <button data-v="settings">Settings</button>
   </nav>
@@ -358,6 +359,7 @@ document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{view=b.datase
   document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('active',x===b));render();});
 function render(){ if(view==='dashboard') current?renderPolicy():renderDash();
   else if(view==='register') renderRegister();
+  else if(view==='reminders') renderReminders();
   else if(view==='documents') renderDocuments();
   else renderSettings(); }
 
@@ -426,6 +428,7 @@ function renderPolicy(editing){
         <div style="background:#eef3f9;border-radius:7px;padding:8px 12px"><b style="display:block;color:var(--navy);font-size:11px">VERSION</b><input class="fmedit" id="fm_version" value="${esc(fm.version)}"></div>
         <div style="background:#eef3f9;border-radius:7px;padding:8px 12px"><b style="display:block;color:var(--navy);font-size:11px">EFFECTIVE DATE</b><input class="fmedit" id="fm_effective_date" value="${esc(fm.effective_date)}" placeholder="e.g. August 1, 2026"></div>
         <div style="background:#eef3f9;border-radius:7px;padding:8px 12px"><b style="display:block;color:var(--navy);font-size:11px">NEXT REVIEW</b><input class="fmedit" id="fm_next_review" value="${esc(fm.next_review)}"></div>
+        <div style="background:#eef3f9;border-radius:7px;padding:8px 12px"><b style="display:block;color:var(--navy);font-size:11px">REVIEW CADENCE</b><select class="fmedit" id="fm_review_cadence" style="border-bottom:1px dashed #b9c6d6;background:transparent">${CADENCES.map(c=>`<option ${c===policyCadence(fm)?'selected':''}>${c}</option>`).join('')}</select></div>
       </div>
       <div id="wysiwyg"></div>
       <div class="commitrow"><input id="cmsg" placeholder="What changed? e.g. 'Defined 48-hour documentation timeframe'">
@@ -440,6 +443,7 @@ function renderPolicy(editing){
         <div><b>Owner</b>${esc(fm.owner)}</div>
         <div><b>Approver</b>${esc(fm.approver)}</div>
         <div><b>Version</b>${esc(fm.version)} · <span class="pill ${fm.priority}">${esc(fm.priority)}</span> <span class="pill s${(fm.status||'Draft').replace(' ','.')}">${esc(fm.status)}</span></div>
+        <div><b>Review</b>${esc(policyCadence(fm))} · next due <b>${fmtDue(dueMeta(fm).due)}</b>${(()=>{const dm=dueMeta(fm);return dm.due&&dm.days<0?` <span class="pill P1">${-dm.days}d overdue</span>`:'';})()}</div>
       </div>
       ${flags.length?`<div style="margin-bottom:14px;padding:12px 14px;background:#fde8e6;border-radius:8px;font-size:13px">
         <b style="color:var(--p1)">⚠ ${flags.length} open item${flags.length>1?'s':''} in this policy</b>
@@ -485,6 +489,7 @@ async function savePolicy(){
   const {fm}=parseFM(current.text);
   const oldVersion=fm.version||'';
   ['owner','version','effective_date','next_review'].forEach(k=>{const el=$('#fm_'+k);if(el)fm[k]=el.value.trim();});
+  ['review_cadence'].forEach(k=>{const el=$('#fm_'+k);if(el)fm[k]=el.value.trim();});
   let bodyText=(tui?tui.getMarkdown():$('#fallback_ed').value).trim();
   if((fm.version||'')!==oldVersion){  // version changed → log it in the Revision History table
     bodyText=appendRevision(bodyText,fm.version,$('#cmsg').value.trim(),cfg.name);
@@ -601,7 +606,7 @@ async function createPolicy(){
   const fm={id:std,title,chapter:$('#n_chapter').value.trim()||'Uncategorized',
     standard:std,eps:$('#n_eps').value.trim()||'1',owner:$('#n_owner').value.trim()||'—',
     approver:$('#n_approver').value.trim()||'—',version:'0.1 (Draft)',priority:$('#n_pri').value,
-    status:'Draft',effective_date:'',next_review:''};
+    status:'Draft',effective_date:'',next_review:'',review_cadence:'Annual'};
   const slug=title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60);
   const path=`policies/${std.replace(/\./g,'-')}-${slug}.md`;
   if(manifest.some(p=>p.path===path)) return toast('A policy with that standard and title already exists',true);
@@ -650,7 +655,7 @@ Applicable state licensing and confidentiality requirements in each jurisdiction
   try{
     const sha=await ghWrite(path,text,`New policy: ${std} ${title} [${cfg.name||'team'}]`,undefined);
     manifest.push({id:std,title,chapter:fm.chapter,standard:std,eps:fm.eps,owner:fm.owner,
-      priority:fm.priority,status:'Draft',path,flags:1});
+      priority:fm.priority,status:'Draft',review_cadence:'Annual',path,flags:1});
     manifest.sort((a,b)=>a.id.localeCompare(b.id));
     shas['data/manifest.json']=await ghWrite('data/manifest.json',JSON.stringify(manifest,null,1),
       `Add to manifest: ${std}`,shas['data/manifest.json']);
@@ -707,6 +712,89 @@ async function setItem(num,status){
       toast(`Item #${num} ${status.toLowerCase()}`); renderRegister(); }
     catch(e2){ toast(e2.message,true); }
   }
+}
+/* ================= review reminders ================= */
+const CADENCES=['Annual','Quarterly','Monthly','Semiannual','Every 2 years','Every 3 years','As needed'];
+function parseReviewDate(s){ if(!s) return null; const d=new Date(s); return isNaN(d.getTime())?null:new Date(d.getFullYear(),d.getMonth(),d.getDate()); }
+function startOfToday(){ const n=new Date(); return new Date(n.getFullYear(),n.getMonth(),n.getDate()); }
+function policyCadence(p){
+  if(p.review_cadence && CADENCES.includes(p.review_cadence)) return p.review_cadence;
+  const t=((p.review_cadence||'')+' '+(p.next_review||'')).toLowerCase();
+  if(/quarter/.test(t)) return 'Quarterly';
+  if(/\bmonth/.test(t)) return 'Monthly';
+  if(/semi|biann|twice a year|every 6 month/.test(t)) return 'Semiannual';
+  if(/3\s*year|three\s*year|triennial/.test(t)) return 'Every 3 years';
+  if(/2\s*year|two\s*year|bienn/.test(t)) return 'Every 2 years';
+  if(/annual|yearly|every year|per year|1\s*year/.test(t)) return 'Annual';
+  return 'Annual';
+}
+function computeNextDue(cadence, anchor){
+  const base=anchor||startOfToday();
+  const nextOn=(m,d)=>{let x=new Date(base.getFullYear(),m,d); if(x<=base)x=new Date(base.getFullYear()+1,m,d); return x;};
+  if(cadence==='Annual') return nextOn(7,1);                       // Aug 1
+  if(cadence==='Monthly'){ let x=new Date(base.getFullYear(),base.getMonth(),15); if(x<=base)x=new Date(base.getFullYear(),base.getMonth()+1,15); return x; }
+  if(cadence==='Quarterly'){ const y=base.getFullYear(); const c=[[0,1],[3,1],[6,1],[9,1]].map(a=>new Date(y,a[0],a[1])); c.push(new Date(y+1,0,1)); return c.find(d=>d>base); }
+  if(cadence==='Semiannual'){ const y=base.getFullYear(); const c=[new Date(y,1,1),new Date(y,7,1),new Date(y+1,1,1)]; return c.find(d=>d>base); } // Feb 1 / Aug 1
+  if(cadence==='Every 2 years'||cadence==='Every 3 years'){ const n=cadence==='Every 2 years'?2:3; const target=new Date(base.getFullYear()+n,base.getMonth(),base.getDate()); let x=new Date(target.getFullYear(),7,1); if(x<target)x=new Date(target.getFullYear()+1,7,1); return x; }
+  return null; // As needed
+}
+function dueMeta(p){
+  const cad=policyCadence(p);
+  const anchor=parseReviewDate(p.last_reviewed)||parseReviewDate(p.effective_date);
+  const due=computeNextDue(cad,anchor);
+  const days=due?Math.round((due-startOfToday())/86400000):null;
+  return {cad,anchor,due,days};
+}
+function fmtDue(d){ return d?d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):'—'; }
+function renderReminders(){
+  const rows=manifest.map(p=>({p,...dueMeta(p)}));
+  const sched=rows.filter(r=>r.due).sort((a,b)=>a.due-b.due);
+  const overdue=sched.filter(r=>r.days<0);
+  const soon=sched.filter(r=>r.days>=0&&r.days<=60);
+  const later=sched.filter(r=>r.days>60);
+  const asneeded=rows.filter(r=>!r.due).sort((a,b)=>String(a.p.id).localeCompare(String(b.p.id)));
+  const badge=r=> r.days<0?`<span class="pill P1">${-r.days}d overdue</span>`
+    : r.days<=60?`<span class="pill P2">in ${r.days}d</span>`
+    : `<span class="pill P3">in ${r.days}d</span>`;
+  const line=r=>`<tr>
+    <td onclick="openPolicy('${esc(r.p.path).replace(/'/g,"\\'")}')" style="cursor:pointer">${esc(r.p.id)}</td>
+    <td onclick="openPolicy('${esc(r.p.path).replace(/'/g,"\\'")}')" style="cursor:pointer"><b>${esc(r.p.title)}</b></td>
+    <td>${esc(String(r.p.owner||'—').split(',')[0])}</td>
+    <td>${esc(r.cad)}</td>
+    <td>${esc(r.p.last_reviewed||'—')}</td>
+    <td style="white-space:nowrap">${r.due?`<b>${fmtDue(r.due)}</b> ${badge(r)}`:'<span style="color:var(--muted)">—</span>'}</td>
+    <td><button class="btn green" style="padding:4px 10px;font-size:12px;white-space:nowrap" onclick="markReviewed(this.dataset.p,this)" data-p="${esc(r.p.path)}">✓ Mark reviewed</button></td>
+  </tr>`;
+  const section=(title,arr)=> arr.length?`<h3 style="color:var(--navy);margin:20px 0 8px">${title} <span style="color:var(--muted);font-weight:400;font-size:13px">(${arr.length})</span></h3>
+    <table><thead><tr><th>Standard</th><th>Policy</th><th>Owner</th><th>Cadence</th><th>Last reviewed</th><th>Next due</th><th></th></tr></thead><tbody>${arr.map(line).join('')}</tbody></table>`:'';
+  app.innerHTML=`
+  <div class="stats">
+    <div class="stat"><div class="n" style="color:var(--p1)">${overdue.length}</div><div class="l">Overdue</div></div>
+    <div class="stat"><div class="n" style="color:var(--p2)">${soon.length}</div><div class="l">Due within 60 days</div></div>
+    <div class="stat"><div class="n">${later.length}</div><div class="l">Scheduled later</div></div>
+    <div class="stat"><div class="n">${asneeded.length}</div><div class="l">As needed / no date</div></div>
+  </div>
+  <div class="regnote">Dates come from each policy's cadence and last-reviewed date: <b>annual</b> → Aug 1, <b>quarterly</b> → Jan/Apr/Jul/Oct 1, <b>monthly</b> → the 15th, <b>semiannual</b> → Feb 1 &amp; Aug 1, <b>every 2–3 yrs</b> → Aug 1 of the target year. Set a policy's cadence in its editor (✎ Edit). "Mark reviewed" stamps today and rolls the next date forward.</div>
+  ${section('⚠ Overdue',overdue)}
+  ${section('Due soon',soon)}
+  ${section('Upcoming',later)}
+  ${section('As needed / no scheduled date',asneeded)}`;
+}
+async function markReviewed(path,btn){
+  if(!confirm('Mark this policy reviewed as of today?\n\nUpdates its last-reviewed date and commits to GitHub; the next due date rolls forward from today.')) return;
+  if(btn){btn.disabled=true;btn.textContent='Saving…';}
+  try{
+    const r=await ghRead(path);
+    const {fm,body}=parseFM(r.text);
+    fm.last_reviewed=new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'2-digit'});
+    await ghWrite(path,buildFM(fm)+body,`Reviewed ${fm.id} — no content change [${cfg.name||'team'}]`,r.sha);
+    const i=manifest.findIndex(p=>p.path===path);
+    if(i>=0) manifest[i]={...manifest[i],last_reviewed:fm.last_reviewed};
+    const writeM=async()=>{ shas['data/manifest.json']=await ghWrite('data/manifest.json',JSON.stringify(manifest,null,1),`Sync manifest: reviewed ${fm.id}`,shas['data/manifest.json']); };
+    try{ await writeM(); }catch(e){ const m=await ghRead('data/manifest.json'); shas['data/manifest.json']=m.sha; await writeM(); }
+    toast('Marked reviewed — schedule updated');
+    renderReminders();
+  }catch(e){ toast('Failed: '+e.message,true); if(btn){btn.disabled=false;btn.textContent='✓ Mark reviewed';} }
 }
 /* ================= supporting documents ================= */
 async function ghTreePaths(){
