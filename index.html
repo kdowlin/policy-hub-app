@@ -79,7 +79,8 @@ select.inline{padding:4px 8px;border:1px solid var(--border);border-radius:6px;f
 <header>
   <div><h1>YAA Policy Hub</h1><div class="sub">Joint Commission BHC · standards eff. July 1, 2026</div></div>
   <nav id="nav" class="hidden">
-    <button data-v="dashboard" class="active">Policies</button>
+    <button data-v="overview" class="active">Overview</button>
+    <button data-v="dashboard">Policies</button>
     <button data-v="register">Remediation Register</button>
     <button data-v="reminders">Reminders</button>
     <button data-v="documents">Supporting Documents</button>
@@ -112,7 +113,7 @@ async function ghWrite(path,content,message,sha){
   return (await r.json()).content.sha;
 }
 /* ================= state ================= */
-let manifest=[], register=[], view='dashboard', current=null, shas={};
+let manifest=[], register=[], view='overview', current=null, shas={};
 const $=s=>document.querySelector(s);
 const app=$('#app');
 const toast=(m,err)=>{const t=$('#toast');t.textContent=m;t.className='toast show'+(err?' err':'');setTimeout(()=>t.className='toast',3200);};
@@ -357,12 +358,81 @@ async function boot(){
 }
 document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{view=b.dataset.v;current=null;
   document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('active',x===b));render();});
-function render(){ if(view==='dashboard') current?renderPolicy():renderDash();
+function render(){ if(view==='overview') current?renderPolicy():renderOverview();
+  else if(view==='dashboard') current?renderPolicy():renderDash();
   else if(view==='register') renderRegister();
   else if(view==='reminders') renderReminders();
   else if(view==='documents') renderDocuments();
   else renderSettings(); }
 
+/* ================= overview dashboard ================= */
+function goView(v){ view=v; current=null;
+  document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('active',x.dataset.v===v));
+  render(); }
+async function renderOverview(){
+  app.innerHTML='<div class="spin">Loading overview…</div>';
+  await loadObligations();
+  try{ if(!docsCache){ const idx=await ghRead('supporting-documents/INDEX.md'); docsCache=parseDocsIndex(idx.text,await ghTreePaths()); } }catch(e){}
+  // reminder items (same math as the Reminders tab)
+  const rem=[];
+  if(obligations) for(const o of obligations){ if(STANDING.includes(o.cadence))continue;
+    const due=obNextDue(o); if(due) rem.push({what:o.task,owner:o.owner,due,days:Math.round((due-startOfToday())/86400000),kind:'task'}); }
+  for(const p of manifest){ const m=dueMeta(p); if(m.due) rem.push({what:'Review: '+p.title,owner:String(p.owner||'—').split(',')[0],due:m.due,days:m.days,kind:'review',path:p.path}); }
+  rem.sort((a,b)=>a.due-b.due);
+  const overdue=rem.filter(r=>r.days<0), soon=rem.filter(r=>r.days>=0&&r.days<=60);
+  const attention=rem.filter(r=>r.days<=14).slice(0,8);
+  const adopted=manifest.filter(p=>p.status==='Adopted').length;
+  const openFlags=manifest.reduce((a,p)=>a+(p.flags||0),0);
+  const flagged=manifest.filter(p=>p.flags>0);
+  const openReg=register.filter(i=>i.status!=='Closed');
+  const p1Reg=openReg.filter(i=>String(i.priority).startsWith('P1'));
+  const docsTbd=docsCache?docsCache.rows.filter(r=>r.loc.type!=='file').length:null;
+  const docsIn=docsCache?docsCache.rows.filter(r=>r.loc.type==='file').length:null;
+  const tile=(n,l,v,color)=>`<div class="stat" style="cursor:pointer" onclick="goView('${v}')"><div class="n"${color?` style="color:${color}"`:''}>${n}</div><div class="l">${l}</div></div>`;
+  // table of contents by chapter
+  const chapters={};
+  for(const p of manifest){ (chapters[p.chapter]=chapters[p.chapter]||[]).push(p); }
+  const chapNames=Object.keys(chapters).sort();
+  const statusDot=s=>`<span class="pill s${String(s||'Draft').replace(' ','.')}" style="font-size:10px;padding:1px 7px">${esc(s||'Draft')}</span>`;
+  const toc=chapNames.map(ch=>{
+    const ps=chapters[ch].sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+    const ad=ps.filter(p=>p.status==='Adopted').length;
+    const fl=ps.reduce((a,p)=>a+(p.flags||0),0);
+    return `<div class="card" style="margin-bottom:12px">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
+        <h3 style="color:var(--navy);font-size:15px">${esc(ch)}</h3>
+        <span style="color:var(--muted);font-size:12px">${ps.length} polic${ps.length===1?'y':'ies'} · ${ad} adopted${fl?` · <span class="flagcount">⚠ ${fl} flag${fl>1?'s':''}</span>`:''}</span>
+      </div>
+      ${ps.map(p=>`<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--border);cursor:pointer" onclick="openPolicy('${esc(p.path).replace(/'/g,"\\'")}')">
+        <span style="font-size:12px;color:var(--muted);min-width:105px;white-space:nowrap">${esc(p.id)}</span>
+        <b style="flex:1;font-size:13.5px">${esc(p.title)}</b>
+        ${p.flags?`<span class="flagcount" style="font-size:12px">⚠ ${p.flags}</span>`:''}
+        ${statusDot(p.status)}
+      </div>`).join('')}
+    </div>`; }).join('');
+  app.innerHTML=`
+  <div class="stats">
+    ${tile(manifest.length+`<span style="font-size:13px;color:var(--muted);font-weight:400"> / ${adopted} adopted</span>`,'Policies','dashboard')}
+    ${tile(overdue.length,'Overdue items','reminders',overdue.length?'var(--p1)':'var(--green)')}
+    ${tile(soon.length,'Due within 60 days','reminders',soon.length?'var(--p2)':'')}
+    ${tile(openFlags,'Open flags in policies','dashboard',openFlags?'var(--p1)':'var(--green)')}
+    ${tile(openReg.length+(p1Reg.length?`<span style="font-size:13px;color:var(--p1);font-weight:400"> (${p1Reg.length} P1)</span>`:''),'Open register items','register')}
+    ${docsTbd===null?'':tile(`${docsIn}<span style="font-size:13px;color:var(--muted);font-weight:400"> / ${docsIn+docsTbd}</span>`,'Supporting docs in repo','documents',docsTbd?'var(--p2)':'var(--green)')}
+  </div>
+  ${attention.length?`<div class="card" style="border-left:4px solid ${attention.some(r=>r.days<0)?'var(--p1)':'var(--p2)'}">
+    <b style="color:var(--navy)">Needs attention — next 14 days${overdue.length?` (${overdue.length} overdue)`:''}</b>
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">
+    ${attention.map(r=>`<div style="display:flex;gap:10px;align-items:center;font-size:13px;${r.path?'cursor:pointer':''}" ${r.path?`onclick="openPolicy('${esc(r.path).replace(/'/g,"\\'")}')"`:''}>
+      <span style="min-width:88px;white-space:nowrap">${r.days<0?`<span class="pill P1">${-r.days}d overdue</span>`:`<span class="pill P2">in ${r.days}d</span>`}</span>
+      <b style="flex:1">${esc(r.what)}</b>
+      <span style="color:var(--muted);font-size:12px;white-space:nowrap">${esc(r.owner)} · ${fmtDue(r.due)}</span>
+    </div>`).join('')}</div>
+    <div style="margin-top:10px"><a href="#" style="font-size:12.5px;color:var(--navy)" onclick="goView('reminders');return false">Open full reminders →</a></div>
+  </div>`:''}
+  ${flagged.length?`<div class="regnote">Policies with open ⚠ items: ${flagged.map(p=>`<a href="#" style="color:var(--p1)" onclick="openPolicy('${esc(p.path).replace(/'/g,"\\'")}');return false">${esc(p.id)} (${p.flags})</a>`).join(' · ')}</div>`:''}
+  <h2 style="color:var(--navy);font-size:17px;margin:18px 0 10px">Policy library — table of contents</h2>
+  ${toc}`;
+}
 /* ================= dashboard ================= */
 let f_ch='',f_pr='',f_st='',f_ow='',f_q='';
 function renderDash(){
