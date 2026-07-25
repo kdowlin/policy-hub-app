@@ -125,6 +125,24 @@ function parseFM(text){
   return {fm,body:text.slice(m[0].length),raw:m[0]};
 }
 function buildFM(fm){return '---\n'+Object.entries(fm).map(([k,v])=>`${k}: "${String(v).replace(/"/g,'\\"')}"`).join('\n')+'\n---\n\n';}
+function fmtRevDate(){return new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'2-digit'});}
+/* Append a Revision History log row (newest-first, right under the table header).
+   Robust to a missing table or missing section — builds them if needed. */
+function appendRevision(body,version,desc,author){
+  const cell=s=>String(s??'').replace(/\|/g,'\\|').replace(/\n/g,' ').trim();
+  const row=`| ${cell(version)} | ${fmtRevDate()} | ${cell(desc||'Version updated.')} | ${cell(author||'Team')} |`;
+  const lines=body.split('\n');
+  let h=-1;
+  for(let i=0;i<lines.length;i++){ if(/^#{1,6}\s.*Revision History/i.test(lines[i])){ h=i; break; } }
+  if(h>=0){
+    for(let i=h+1;i<Math.min(lines.length,h+10);i++){
+      if(/^\s*\|[\s:|-]{3,}\|\s*$/.test(lines[i])){ lines.splice(i+1,0,row); return lines.join('\n'); }
+    }
+    lines.splice(h+1,0,'','| Version | Date | Description | Author |','| --- | --- | --- | --- |',row);
+    return lines.join('\n');
+  }
+  return body.replace(/\s*$/,'')+`\n\n## Revision History\n\n| Version | Date | Description | Author |\n| --- | --- | --- | --- |\n${row}\n`;
+}
 
 /* ================= PDF export (print-to-PDF) =================
    Renders policies into a print-styled document in a hidden iframe
@@ -465,9 +483,13 @@ async function resolveFlag(i){
 async function savePolicy(){
   const msg=$('#cmsg').value.trim()||`Edit ${current.fm.id}`;
   const {fm}=parseFM(current.text);
+  const oldVersion=fm.version||'';
   ['owner','version','effective_date','next_review'].forEach(k=>{const el=$('#fm_'+k);if(el)fm[k]=el.value.trim();});
-  const bodyText=tui?tui.getMarkdown():$('#fallback_ed').value;
-  const text=buildFM(fm)+bodyText.trim()+'\n';
+  let bodyText=(tui?tui.getMarkdown():$('#fallback_ed').value).trim();
+  if((fm.version||'')!==oldVersion){  // version changed → log it in the Revision History table
+    bodyText=appendRevision(bodyText,fm.version,$('#cmsg').value.trim(),cfg.name);
+  }
+  const text=buildFM(fm)+bodyText+'\n';
   try{
     current.sha=await ghWrite(current.path,text,`${msg} [${cfg.name||'team'}]`,current.sha);
     current.text=text;
