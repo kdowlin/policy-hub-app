@@ -84,6 +84,7 @@ select.inline{padding:4px 8px;border:1px solid var(--border);border-radius:6px;f
     <button data-v="register">Remediation Register</button>
     <button data-v="reminders">Reminders</button>
     <button data-v="documents">Supporting Documents</button>
+    <button data-v="legal">Privacy &amp; Terms</button>
     <button data-v="settings">Settings</button>
   </nav>
 </header>
@@ -363,6 +364,7 @@ function render(){ if(view==='overview') current?renderPolicy():renderOverview()
   else if(view==='register') renderRegister();
   else if(view==='reminders') renderReminders();
   else if(view==='documents') renderDocuments();
+  else if(view==='legal') renderLegal();
   else renderSettings(); }
 
 /* ================= overview dashboard ================= */
@@ -1041,6 +1043,68 @@ async function downloadDoc(path){
     setTimeout(()=>URL.revokeObjectURL(url),4000);
     toast('Downloaded '+fn);
   }catch(e){ toast('Download failed: '+e.message,true); }
+}
+/* ================= privacy & terms management ================= */
+let legalCache=null;
+async function renderLegal(){
+  app.innerHTML='<div class="spin">Loading privacy &amp; terms…</div>';
+  try{
+    if(!legalCache){
+      const r=await ghRead('data/legal.json');
+      legalCache={data:JSON.parse(r.text),tree:new Set(await ghTreePaths())};
+      shas['data/legal.json']=r.sha;
+    }
+  }catch(e){
+    app.innerHTML=`<div class="card"><b style="color:var(--p1)">Couldn't load the legal registry</b>
+      <div style="margin-top:6px;color:var(--muted);font-size:13px">${esc(e.message)} — expected <code>data/legal.json</code> in the repo (and documents under <code>legal/</code>).</div></div>`;
+    return;
+  }
+  const {docs,gaps,flow}=legalCache.data, tree=legalCache.tree;
+  const drafts=docs.filter(d=>/draft|template|placeholder|reference/i.test(d.status)).length;
+  const openCount=docs.reduce((a,d)=>a+(d.open_items||[]).length,0);
+  const p1gaps=gaps.filter(g=>g.sev==='P1').length;
+  const byId={}; docs.forEach(d=>byId[d.id]=d);
+  const dl=d=> tree.has(d.path)
+    ?`<button class="btn green" style="padding:3px 9px;font-size:11.5px;white-space:nowrap" onclick="downloadDoc(this.dataset.p)" data-p="${esc(d.path)}">⬇ ${esc(d.path.split('/').pop())}</button>`
+    :`<span class="pill P2" title="Commit this file under legal/ in the repo">not in repo yet</span> <span style="color:var(--muted);font-size:11.5px">${esc(d.path)}</span>`;
+  app.innerHTML=`
+  <div class="stats">
+    <div class="stat"><div class="n">${docs.length}</div><div class="l">Legal documents</div></div>
+    <div class="stat"><div class="n" style="color:var(--p2)">${drafts}</div><div class="l">Still draft / template</div></div>
+    <div class="stat"><div class="n" style="color:var(--p2)">${openCount}</div><div class="l">Open counsel items</div></div>
+    <div class="stat"><div class="n" style="color:var(--p1)">${gaps.length}</div><div class="l">Missing documents (${p1gaps} P1)</div></div>
+  </div>
+  <div class="regnote">Member-facing legal stack: what exists, how the documents depend on each other, and exactly when each signature is captured in onboarding. Files live under <code>legal/</code>; this registry is <code>data/legal.json</code>. The full written analysis is <code>legal/PRIVACY_TERMS_MAP.md</code>.</div>
+
+  <h3 style="color:var(--navy);margin:18px 0 8px">Signature flow — what gets signed when</h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px">
+  ${flow.map(f=>`<div class="card" style="margin-bottom:0">
+    <b style="color:var(--navy);font-size:13.5px">${esc(f.stage)}</b>
+    <ul style="margin:8px 0 0 18px;font-size:12.5px;line-height:1.5">${f.items.map(i=>`<li>${esc(i).replace(/\[(FORM MISSING|TEMPLATES MISSING)\]/,'<span class="pill P1">$1</span>')}</li>`).join('')}</ul>
+  </div>`).join('')}
+  </div>
+
+  <h3 style="color:var(--navy);margin:22px 0 8px">Document registry &amp; interplay</h3>
+  ${docs.map(d=>`<div class="card" style="margin-bottom:10px">
+    <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+      <b style="font-size:14.5px">${esc(d.title)}</b>
+      <span class="pill P3">${esc(d.type)}</span>
+      <span class="pill ${/final/i.test(d.status)?'sAdopted':'sReview'}">${esc(d.status)}</span>
+      <span style="margin-left:auto">${dl(d)}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:6px;margin:10px 0 8px">
+      <div style="background:#eef3f9;border-radius:6px;padding:6px 10px;font-size:12px"><b style="color:var(--navy);font-size:10.5px;display:block">AUDIENCE</b>${esc(d.audience)}</div>
+      <div style="background:#eef3f9;border-radius:6px;padding:6px 10px;font-size:12px"><b style="color:var(--navy);font-size:10.5px;display:block">SIGNED / ACCEPTED</b>${esc(d.trigger)}</div>
+      <div style="background:#eef3f9;border-radius:6px;padding:6px 10px;font-size:12px"><b style="color:var(--navy);font-size:10.5px;display:block">RENEWAL / REVOCATION</b>${esc(d.renewal)}</div>
+    </div>
+    <div style="font-size:13px;line-height:1.5">${esc(d.role)}</div>
+    ${(d.related||[]).length?`<div style="margin-top:6px;font-size:12px;color:var(--muted)">Interplays with: ${d.related.map(r=>byId[r]?`<b>${esc(byId[r].title.split(' (')[0])}</b>`:esc(r)).join(' · ')}</div>`:''}
+    ${(d.open_items||[]).length?`<div style="margin-top:8px;padding:8px 10px;background:#fdf3d7;border-radius:6px;font-size:12.5px"><b style="color:var(--p2)">Open items (${d.open_items.length}):</b><ul style="margin:4px 0 0 18px">${d.open_items.map(i=>`<li>${esc(i)}</li>`).join('')}</ul></div>`:''}
+  </div>`).join('')}
+
+  <h3 style="color:var(--p1);margin:22px 0 8px">⚠ Missing documents — called out</h3>
+  <table><thead><tr><th style="width:34%">What's missing</th><th style="width:8%">Priority</th><th>Why it matters</th></tr></thead>
+  <tbody>${gaps.map(g=>`<tr><td><b>${esc(g.g)}</b></td><td><span class="pill ${esc(g.sev)}">${esc(g.sev)}</span></td><td style="font-size:12.5px">${esc(g.why)}</td></tr>`).join('')}</tbody></table>`;
 }
 /* ================= settings ================= */
 function renderSettings(){
