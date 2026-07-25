@@ -1080,7 +1080,7 @@ async function renderLegal(){
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px">
   ${flow.map(f=>`<div class="card" style="margin-bottom:0">
     <b style="color:var(--navy);font-size:13.5px">${esc(f.stage)}</b>
-    <ul style="margin:8px 0 0 18px;font-size:12.5px;line-height:1.5">${f.items.map(i=>`<li>${esc(i).replace(/\[(FORM MISSING|TEMPLATES MISSING)\]/,'<span class="pill P1">$1</span>')}</li>`).join('')}</ul>
+    <ul style="margin:8px 0 0 18px;font-size:12.5px;line-height:1.5">${f.items.map(i=>`<li>${esc(i).replace(/\[(FORM MISSING|TEMPLATES MISSING|PROCEDURE MISSING|FORMULATION PENDING SHERRI)\]/g,'<span class="pill P1">$1</span>')}</li>`).join('')}</ul>
   </div>`).join('')}
   </div>
 
