@@ -81,6 +81,7 @@ select.inline{padding:4px 8px;border:1px solid var(--border);border-radius:6px;f
   <nav id="nav" class="hidden">
     <button data-v="dashboard" class="active">Policies</button>
     <button data-v="register">Remediation Register</button>
+    <button data-v="documents">Supporting Documents</button>
     <button data-v="settings">Settings</button>
   </nav>
 </header>
@@ -338,7 +339,9 @@ async function boot(){
 document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{view=b.dataset.v;current=null;
   document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('active',x===b));render();});
 function render(){ if(view==='dashboard') current?renderPolicy():renderDash();
-  else if(view==='register') renderRegister(); else renderSettings(); }
+  else if(view==='register') renderRegister();
+  else if(view==='documents') renderDocuments();
+  else renderSettings(); }
 
 /* ================= dashboard ================= */
 let f_ch='',f_pr='',f_st='',f_ow='',f_q='';
@@ -359,6 +362,7 @@ function renderDash(){
   </div>
   <div class="filters">
     <button class="btn" style="white-space:nowrap" onclick="renderNewPolicy()">+ New policy</button>
+    <button class="btn ghost" style="white-space:nowrap" title="Scan the policies/ folder and add any policy files that aren't in the index yet" onclick="syncFromFolder(this)">⟳ Sync folder</button>
     <button class="btn ghost" id="binderbtn" style="white-space:nowrap" title="Combine ${filtered?'the filtered':'all'} policies into one print-ready binder — save it as a single PDF from the print dialog" onclick="downloadBinder()">⬇ Binder PDF</button>
     <input placeholder="Search title or standard…" value="${esc(f_q)}" oninput="f_q=this.value;renderDash()">
     <select onchange="f_ch=this.value;renderDash()"><option value="">All chapters</option>${chs.map(c=>`<option ${c===f_ch?'selected':''}>${esc(c)}</option>`).join('')}</select>
@@ -498,6 +502,59 @@ async function syncManifest(){
       `Sync manifest: ${fm.id}`,shas['data/manifest.json']);
   }
 }
+/* ================= sync manifest from folder ================= */
+async function syncFromFolder(btn){
+  if(btn){btn.disabled=true;btn.textContent='Scanning…';}
+  try{
+    const tree=await ghTreePaths();
+    const isPolicy=p=>/^policies\/(?:.*\/)?POL-[^/]+\.md$/.test(p);
+    const known=new Set(manifest.map(e=>e.path));
+    const treeSet=new Set(tree);
+    const missing=tree.filter(p=>isPolicy(p)&&!known.has(p));
+    const orphans=manifest.filter(e=>!treeSet.has(e.path)).map(e=>e.id);
+    if(!missing.length){
+      toast(orphans.length
+        ?`In sync (${manifest.length}). Heads up: ${orphans.length} index entr${orphans.length>1?'ies':'y'} point to missing files — ${orphans.join(', ')}`
+        :`Everything's in sync — ${manifest.length} policies`, !!orphans.length);
+      return;
+    }
+    if(btn)btn.textContent=`Reading ${missing.length}…`;
+    const chapByPre={}; manifest.forEach(e=>{const k=String(e.id).split('.')[0]; if(!chapByPre[k])chapByPre[k]=e.chapter;});
+    const folderChapter=p=>{const seg=p.split('/'); const d=seg.length>2?seg[1]:''; return d.replace(/^\d+_/,'').replace(/_/g,' ').trim();};
+    const added=[];
+    for(const path of missing){
+      try{
+        const r=await ghRead(path);
+        const {fm,body}=parseFM(r.text);
+        const id=fm.id||path.split('/').pop().replace(/^POL-/,'').replace(/_.*$/,'');
+        const pre=String(id).split('.')[0];
+        const flags=(body.match(/^> ⚠ /gm)||[]).length;
+        manifest.push({id,title:fm.title||id,
+          chapter:fm.chapter||chapByPre[pre]||folderChapter(path)||'Uncategorized',
+          standard:fm.standard||id,eps:fm.eps||'1',owner:fm.owner||'—',approver:fm.approver||'',
+          version:fm.version||'',status:fm.status||'Draft',priority:fm.priority||'P2',
+          effective_date:fm.effective_date||'',last_reviewed:fm.last_reviewed||'',next_review:fm.next_review||'',
+          path,flags});
+        added.push(id);
+      }catch(e){/* skip unreadable file */}
+    }
+    if(!added.length){ toast('Found new files but none could be read',true); return; }
+    if(!confirm(`Add ${added.length} policy file${added.length>1?'s':''} to the index?\n\n${added.join('\n')}\n\nThis commits data/manifest.json to GitHub.`)){
+      manifest=manifest.filter(e=>known.has(e.path));  // roll back the additions
+      renderDash(); return;
+    }
+    manifest.sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+    const write=async()=>{ shas['data/manifest.json']=await ghWrite('data/manifest.json',
+      JSON.stringify(manifest,null,1),
+      `Sync from folder: +${added.length} (${added.join(', ')}) [${cfg.name||'team'}]`,
+      shas['data/manifest.json']); };
+    try{ await write(); }
+    catch(e){ const m=await ghRead('data/manifest.json'); shas['data/manifest.json']=m.sha; await write(); }
+    toast(`Added ${added.length} — index now ${manifest.length} policies`+(orphans.length?` (${orphans.length} orphaned entr${orphans.length>1?'ies':'y'} remain)`:''));
+    renderDash();
+  }catch(e){ toast('Sync failed: '+e.message,true); }
+  finally{ if(btn){btn.disabled=false;btn.textContent='⟳ Sync folder';} }
+}
 /* ================= new policy ================= */
 function renderNewPolicy(){
   const chs=[...new Set(manifest.map(p=>p.chapter))].sort();
@@ -628,6 +685,112 @@ async function setItem(num,status){
       toast(`Item #${num} ${status.toLowerCase()}`); renderRegister(); }
     catch(e2){ toast(e2.message,true); }
   }
+}
+/* ================= supporting documents ================= */
+async function ghTreePaths(){
+  const r=await api(`git/trees/${encodeURIComponent(cfg.branch)}?recursive=1`);
+  if(!r.ok) throw new Error(`${r.status} reading file tree`);
+  const j=await r.json();
+  return (j.tree||[]).filter(t=>t.type==='blob').map(t=>t.path);
+}
+function parseDocsIndex(text,treePaths){
+  const treeSet=new Set(treePaths);
+  const lines=text.split('\n');
+  const tableStart=lines.findIndex(l=>l.trim().startsWith('|'));
+  const intro=tableStart>0?lines.slice(0,tableStart).join('\n').trim():'';
+  const tRows=lines.slice(tableStart<0?lines.length:tableStart).filter(l=>l.trim().startsWith('|'));
+  const cells=l=>l.replace(/^\s*\|/,'').replace(/\|\s*$/,'').split('|').map(c=>c.trim());
+  const header=tRows.length?cells(tRows[0]):[];
+  const col=name=>header.findIndex(h=>new RegExp(name,'i').test(h));
+  const iA=col('artifact'),iO=col('owner'),iL=col('location'),iR=col('referenced');
+  const rows=tRows.slice(2).map(l=>{
+    const c=cells(l);
+    const artRaw=c[iA]||'';
+    const artifact=artRaw.replace(/\*\(new\)\*/i,'').replace(/\*/g,'').trim();
+    const isNew=/\*\(new\)\*/i.test(artRaw);
+    const owner=c[iO]||'', refs=c[iR]||'', locRaw=c[iL]||'';
+    const pm=locRaw.match(/`([^`]+)`/);
+    let loc;
+    if(pm&&treeSet.has(pm[1])) loc={type:'file',path:pm[1]};
+    else if(pm) loc={type:'missing',path:pm[1]};
+    else loc={type:'tbd',note:locRaw.replace(/\*\*/g,'').replace(/`/g,'').trim()};
+    return {artifact,isNew,owner,refs,loc};
+  });
+  const linked=new Set(rows.filter(r=>r.loc.type==='file').map(r=>r.loc.path));
+  const isDoc=p=>/\.(docx?|xlsx?|pptx?|pdf|csv)$/i.test(p);
+  const extra=treePaths.filter(p=>isDoc(p)&&!linked.has(p)&&!/^audit\//.test(p));
+  return {intro,rows,extra};
+}
+let docsCache=null;
+async function renderDocuments(){
+  app.innerHTML='<div class="spin">Loading supporting documents…</div>';
+  try{
+    if(!docsCache){
+      const idx=await ghRead('supporting-documents/INDEX.md');
+      const tree=await ghTreePaths();
+      docsCache=parseDocsIndex(idx.text,tree);
+    }
+  }catch(e){
+    app.innerHTML=`<div class="card"><b style="color:var(--p1)">Couldn't load supporting documents</b>
+      <div style="margin-top:6px;color:var(--muted);font-size:13px">${esc(e.message)} — expected <code>supporting-documents/INDEX.md</code> in the repo.</div></div>`;
+    return;
+  }
+  const {intro,rows,extra}=docsCache;
+  const nFile=rows.filter(r=>r.loc.type==='file').length, nTbd=rows.length-nFile;
+  const dl=(path,label)=>`<button class="btn green" style="padding:4px 10px;font-size:12px;white-space:nowrap" onclick="downloadDoc(this.dataset.p)" data-p="${esc(path)}">⬇ ${esc(label)}</button>`;
+  const locCell=r=>{
+    if(r.loc.type==='file'){
+      const fn=r.loc.path.split('/').pop();
+      const view=`https://github.com/${esc(cfg.repo)}/blob/${esc(cfg.branch)}/${encodeURI(r.loc.path)}`;
+      return `${dl(r.loc.path,fn)} <a class="btn ghost" style="padding:4px 10px;font-size:12px;text-decoration:none;white-space:nowrap" target="_blank" href="${view}">View</a>`;
+    }
+    if(r.loc.type==='missing')
+      return `<span class="pill P2">path not found</span> <span style="color:var(--muted);font-size:12px">${esc(r.loc.path)}</span>`;
+    const extraNote=r.loc.note.replace(/^TBD\s*[—-]\s*/i,'').trim();
+    return `<span class="pill P1">Location TBD</span>${extraNote&&!/^tbd$/i.test(r.loc.note)?`<div style="color:var(--muted);font-size:12px;margin-top:3px">${esc(extraNote)}</div>`:''}`;
+  };
+  app.innerHTML=`
+  <div class="stats">
+    <div class="stat"><div class="n">${rows.length}</div><div class="l">Referenced artifacts</div></div>
+    <div class="stat"><div class="n">${nFile}</div><div class="l">In repo (downloadable)</div></div>
+    <div class="stat"><div class="n">${nTbd}</div><div class="l">Location TBD</div></div>
+  </div>
+  ${intro?`<div class="card mdbody" style="font-size:13.5px">${marked.parse(intro)}</div>`:''}
+  <table><thead><tr><th>Artifact</th><th>Owner</th><th>Document</th><th>Referenced by</th></tr></thead>
+  <tbody>${rows.map(r=>`<tr>
+    <td><b>${esc(r.artifact)}</b>${r.isNew?' <span class="pill P3">new</span>':''}</td>
+    <td style="white-space:nowrap">${esc(r.owner.split('(')[0].trim())}</td>
+    <td>${locCell(r)}</td>
+    <td style="color:var(--muted);font-size:12.5px">${esc(r.refs)}</td>
+  </tr>`).join('')}</tbody></table>
+  ${extra.length?`<div class="card" style="margin-top:16px">
+    <b>Other files committed to the repo but not in the index</b>
+    <div class="regnote">Add these to <code>supporting-documents/INDEX.md</code> to record their owner and which policies reference them.</div>
+    ${extra.map(p=>`<div style="margin:5px 0">${dl(p,p.split('/').pop())} <span style="color:var(--muted);font-size:12px">${esc(p)}</span></div>`).join('')}
+  </div>`:''}`;
+}
+async function downloadDoc(path){
+  const fn=path.split('/').pop();
+  toast('Downloading '+fn+'…');
+  try{
+    const r=await api(`contents/${encodeURIComponent(path).replace(/%2F/g,'/')}?ref=${encodeURIComponent(cfg.branch)}`);
+    if(!r.ok) throw new Error(`${r.status}`);
+    const j=await r.json();
+    let blob;
+    if(j.content){
+      const bin=atob(j.content.replace(/\n/g,''));
+      const arr=new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+      blob=new Blob([arr]);
+    }else if(j.download_url){
+      blob=await (await fetch(j.download_url)).blob();
+    }else throw new Error('empty response');
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=fn;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+    toast('Downloaded '+fn);
+  }catch(e){ toast('Download failed: '+e.message,true); }
 }
 /* ================= settings ================= */
 function renderSettings(){
