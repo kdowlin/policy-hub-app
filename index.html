@@ -746,39 +746,109 @@ function dueMeta(p){
   return {cad,anchor,due,days};
 }
 function fmtDue(d){ return d?d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):'—'; }
-function renderReminders(){
-  const rows=manifest.map(p=>({p,...dueMeta(p)}));
-  const sched=rows.filter(r=>r.due).sort((a,b)=>a.due-b.due);
+/* ---- task-level obligations (data/obligations.json) ---- */
+let obligations=null;
+const STANDING=['Weekly','Daily (weekdays)','Standing','As needed'];
+function obNextDue(o){
+  if(STANDING.includes(o.cadence)) return null;
+  const last=parseReviewDate(o.last_done);
+  // completing early still satisfies the upcoming anchor: skip half a period past the done date
+  const HALF={'Monthly':15,'Quarterly':45,'Semiannual':91,'Annual':182,'Every 2 years':365,'Every 3 years':547}[o.cadence]||0;
+  const base=last?new Date(last.getFullYear(),last.getMonth(),last.getDate()+HALF):startOfToday();
+  const dd=o.day||((o.cadence==='Monthly')?15:1);
+  const nextAfter=(months,d)=>{ // first occurrence in given month anchors strictly after d
+    for(let y=d.getFullYear();y<=d.getFullYear()+1;y++)
+      for(const m of months){ const x=new Date(y,m-1,dd); if(x>d) return x; }
+    return null;
+  };
+  if(o.cadence==='Monthly'){ let x=new Date(base.getFullYear(),base.getMonth(),dd); while(x<=base)x=new Date(x.getFullYear(),x.getMonth()+1,dd); return x; }
+  if(o.cadence==='Quarterly') return nextAfter([1,4,7,10],base);
+  if(o.cadence==='Semiannual') return nextAfter([2,8],base);
+  if(o.cadence==='Annual') return nextAfter([o.month||8],base);
+  if(o.cadence==='Every 2 years'||o.cadence==='Every 3 years'){
+    const n=o.cadence==='Every 2 years'?2:3;
+    if(last){ let x=new Date(last.getFullYear()+n,(o.month||8)-1,dd); if(x<=last)x=new Date(x.getFullYear()+1,(o.month||8)-1,dd); return x; }
+    return nextAfter([o.month||8],startOfToday());
+  }
+  return null;
+}
+async function loadObligations(){
+  if(obligations) return;
+  try{
+    const r=await ghRead('data/obligations.json');
+    obligations=JSON.parse(r.text); shas['data/obligations.json']=r.sha;
+  }catch(e){ obligations=false; }
+}
+async function markDone(obId,btn){
+  const o=(obligations||[]).find(x=>x.id===obId); if(!o) return;
+  if(!confirm(`Mark done today?\n\n${o.task}\n\nStamps today's date and rolls the next due date forward.`)) return;
+  if(btn){btn.disabled=true;btn.textContent='Saving…';}
+  o.last_done=new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'2-digit'});
+  const write=async()=>{ shas['data/obligations.json']=await ghWrite('data/obligations.json',
+    JSON.stringify(obligations,null,1),`Done: ${o.id} ${o.task.slice(0,60)} [${cfg.name||'team'}]`,shas['data/obligations.json']); };
+  try{ try{ await write(); }catch(e){ const r=await ghRead('data/obligations.json'); shas['data/obligations.json']=r.sha; await write(); }
+    toast('Marked done — schedule rolled forward'); renderReminders();
+  }catch(e){ toast('Failed: '+e.message,true); if(btn){btn.disabled=false;btn.textContent='✓ Done';} }
+}
+async function renderReminders(){
+  app.innerHTML='<div class="spin">Loading reminders…</div>';
+  await loadObligations();
+  const items=[];
+  // task-level obligations from the policies
+  if(obligations) for(const o of obligations){
+    const due=obNextDue(o);
+    items.push({kind:'task',key:o.id,what:o.task,note:o.note||'',refs:o.policies||[],owner:o.owner,
+      cad:o.cadence,last:o.last_done||'—',due,days:due?Math.round((due-startOfToday())/86400000):null,
+      standing:STANDING.includes(o.cadence)});
+  }
+  // whole-policy review dates
+  for(const p of manifest){
+    const m=dueMeta(p);
+    items.push({kind:'review',key:p.path,what:'Policy review: '+p.title,note:'',refs:[p.id],owner:String(p.owner||'—').split(',')[0],
+      cad:m.cad,last:p.last_reviewed||'—',due:m.due,days:m.due?Math.round((m.due-startOfToday())/86400000):null,standing:false});
+  }
+  const sched=items.filter(r=>r.due).sort((a,b)=>a.due-b.due);
   const overdue=sched.filter(r=>r.days<0);
   const soon=sched.filter(r=>r.days>=0&&r.days<=60);
   const later=sched.filter(r=>r.days>60);
-  const asneeded=rows.filter(r=>!r.due).sort((a,b)=>String(a.p.id).localeCompare(String(b.p.id)));
+  const standing=items.filter(r=>r.standing);
   const badge=r=> r.days<0?`<span class="pill P1">${-r.days}d overdue</span>`
     : r.days<=60?`<span class="pill P2">in ${r.days}d</span>`
     : `<span class="pill P3">in ${r.days}d</span>`;
+  const kindPill=r=> r.kind==='task'?'<span class="pill P3" style="background:#e3eefc">task</span>':'<span class="pill sDraft">review</span>';
+  const refLinks=r=> r.refs.map(id=>{
+      const p=manifest.find(x=>x.id===id);
+      return p?`<a href="#" style="color:var(--navy)" onclick="openPolicy('${esc(p.path).replace(/'/g,"\\'")}');return false">${esc(id)}</a>`:esc(id);
+    }).join(', ');
+  const action=r=> r.standing?'' : r.kind==='task'
+    ?`<button class="btn green" style="padding:4px 10px;font-size:12px;white-space:nowrap" onclick="markDone(this.dataset.k,this)" data-k="${esc(r.key)}">✓ Done</button>`
+    :`<button class="btn green" style="padding:4px 10px;font-size:12px;white-space:nowrap" onclick="markReviewed(this.dataset.k,this)" data-k="${esc(r.key)}">✓ Reviewed</button>`;
   const line=r=>`<tr>
-    <td onclick="openPolicy('${esc(r.p.path).replace(/'/g,"\\'")}')" style="cursor:pointer">${esc(r.p.id)}</td>
-    <td onclick="openPolicy('${esc(r.p.path).replace(/'/g,"\\'")}')" style="cursor:pointer"><b>${esc(r.p.title)}</b></td>
-    <td>${esc(String(r.p.owner||'—').split(',')[0])}</td>
-    <td>${esc(r.cad)}</td>
-    <td>${esc(r.p.last_reviewed||'—')}</td>
+    <td style="white-space:nowrap">${kindPill(r)}</td>
+    <td><b>${esc(r.what)}</b>${r.note?`<br><span style="color:var(--muted);font-size:12px">${esc(r.note)}</span>`:''}</td>
+    <td style="font-size:12.5px">${refLinks(r)}</td>
+    <td>${esc(r.owner)}</td>
+    <td style="white-space:nowrap">${esc(r.cad)}</td>
+    <td style="white-space:nowrap">${esc(r.last)}</td>
     <td style="white-space:nowrap">${r.due?`<b>${fmtDue(r.due)}</b> ${badge(r)}`:'<span style="color:var(--muted)">—</span>'}</td>
-    <td><button class="btn green" style="padding:4px 10px;font-size:12px;white-space:nowrap" onclick="markReviewed(this.dataset.p,this)" data-p="${esc(r.p.path)}">✓ Mark reviewed</button></td>
+    <td>${action(r)}</td>
   </tr>`;
   const section=(title,arr)=> arr.length?`<h3 style="color:var(--navy);margin:20px 0 8px">${title} <span style="color:var(--muted);font-weight:400;font-size:13px">(${arr.length})</span></h3>
-    <table><thead><tr><th>Standard</th><th>Policy</th><th>Owner</th><th>Cadence</th><th>Last reviewed</th><th>Next due</th><th></th></tr></thead><tbody>${arr.map(line).join('')}</tbody></table>`:'';
+    <table><thead><tr><th></th><th>What</th><th>Policies</th><th>Owner</th><th>Cadence</th><th>Last done</th><th>Next due</th><th></th></tr></thead><tbody>${arr.map(line).join('')}</tbody></table>`:'';
   app.innerHTML=`
   <div class="stats">
     <div class="stat"><div class="n" style="color:var(--p1)">${overdue.length}</div><div class="l">Overdue</div></div>
     <div class="stat"><div class="n" style="color:var(--p2)">${soon.length}</div><div class="l">Due within 60 days</div></div>
     <div class="stat"><div class="n">${later.length}</div><div class="l">Scheduled later</div></div>
-    <div class="stat"><div class="n">${asneeded.length}</div><div class="l">As needed / no date</div></div>
+    <div class="stat"><div class="n">${standing.length}</div><div class="l">Standing practices</div></div>
   </div>
-  <div class="regnote">Dates come from each policy's cadence and last-reviewed date: <b>annual</b> → Aug 1, <b>quarterly</b> → Jan/Apr/Jul/Oct 1, <b>monthly</b> → the 15th, <b>semiannual</b> → Feb 1 &amp; Aug 1, <b>every 2–3 yrs</b> → Aug 1 of the target year. Set a policy's cadence in its editor (✎ Edit). "Mark reviewed" stamps today and rolls the next date forward.</div>
+  ${obligations===false?'<div class="card" style="border-color:var(--p2)"><b style="color:var(--p2)">Task reminders unavailable</b><div style="color:var(--muted);font-size:13px;margin-top:4px">Commit <code>data/obligations.json</code> to the repo to enable task-level reminders extracted from the policies. Policy review dates are still shown below.</div></div>':''}
+  <div class="regnote"><b>Tasks</b> are recurring obligations written into the policy text (drills, audits, surveys, reports); <b>reviews</b> are the whole-policy review cycle. Anchors: annual → Aug 1 (unless the policy implies a season), quarterly → Jan/Apr/Jul/Oct 1, monthly → the 15th. "Done"/"Reviewed" stamps today and rolls the schedule forward. Edit tasks in <code>data/obligations.json</code>.</div>
   ${section('⚠ Overdue',overdue)}
-  ${section('Due soon',soon)}
+  ${section('Due soon (60 days)',soon)}
   ${section('Upcoming',later)}
-  ${section('As needed / no scheduled date',asneeded)}`;
+  ${standing.length?`<h3 style="color:var(--navy);margin:20px 0 8px">Standing practices <span style="color:var(--muted);font-weight:400;font-size:13px">(${standing.length} — continuous, not date-tracked)</span></h3>
+    <table><thead><tr><th></th><th>What</th><th>Policies</th><th>Owner</th><th>Cadence</th></tr></thead><tbody>${standing.map(r=>`<tr><td>${kindPill(r)}</td><td><b>${esc(r.what)}</b></td><td style="font-size:12.5px">${refLinks(r)}</td><td>${esc(r.owner)}</td><td>${esc(r.cad)}</td></tr>`).join('')}</tbody></table>`:''}`;
 }
 async function markReviewed(path,btn){
   if(!confirm('Mark this policy reviewed as of today?\n\nUpdates its last-reviewed date and commits to GitHub; the next due date rolls forward from today.')) return;
